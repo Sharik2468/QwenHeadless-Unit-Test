@@ -63,7 +63,6 @@ def run_qwen(
 ) -> QwenRunResult:
     command = build_qwen_command(
         qwen_bin=qwen_bin,
-        prompt=prompt,
         model=model,
         approval_mode=approval_mode,
         max_session_turns=max_session_turns,
@@ -76,6 +75,7 @@ def run_qwen(
         completed = subprocess.run(
             command,
             cwd=repo_root,
+            input=prompt,
             text=True,
             capture_output=True,
             check=False,
@@ -110,7 +110,6 @@ def run_qwen(
 
 def build_qwen_command(
     qwen_bin: str,
-    prompt: str,
     model: str,
     approval_mode: str,
     max_session_turns: int,
@@ -120,8 +119,6 @@ def build_qwen_command(
 ) -> list[str]:
     command = [
         qwen_bin,
-        "-p",
-        prompt,
         "--output-format",
         "json",
         "--model",

@@ -81,10 +81,33 @@ class QwenOutputParsingTests(unittest.TestCase):
                         output_path=output_path,
                     )
 
+    def test_run_qwen_sends_prompt_via_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "qwen-output.json"
+
+            class Completed:
+                returncode = 0
+                stdout = "[]"
+                stderr = ""
+
+            with patch("testgen_shared.qwen.subprocess.run", return_value=Completed()) as mocked_run:
+                run_qwen(
+                    qwen_bin="qwen",
+                    prompt="prompt through stdin",
+                    repo_root=Path(temp_dir),
+                    model="qwen3.6-27b-fp8",
+                    approval_mode="yolo",
+                    max_session_turns=1,
+                    max_wall_time="1m",
+                    max_tool_calls=1,
+                    output_path=output_path,
+                )
+
+            self.assertEqual(mocked_run.call_args.kwargs["input"], "prompt through stdin")
+
     def test_build_qwen_command_uses_yolo_switch_for_yolo_mode(self) -> None:
         command = build_qwen_command(
             qwen_bin="qwen",
-            prompt="test",
             model="qwen3.6-27b-fp8",
             approval_mode="yolo",
             max_session_turns=10,
@@ -94,6 +117,7 @@ class QwenOutputParsingTests(unittest.TestCase):
 
         self.assertIn("-y", command)
         self.assertNotIn("--approval-mode", command)
+        self.assertNotIn("-p", command)
 
 
 if __name__ == "__main__":
