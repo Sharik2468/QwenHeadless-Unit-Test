@@ -71,3 +71,45 @@ under the configured `artifacts-dir`.
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+## Generic project unit-test orchestrator
+
+This repository also includes a second CLI for classic unit tests in one specific .NET source project:
+
+- plan likely unit-test candidates for one source project
+- pick realistic candidates in repository-owned code
+- implement unit tests in an existing test project
+- build and run tests after each candidate
+- retry failed candidates with repair prompts
+
+### Plan candidates
+
+```bash
+python3 generate_project_unit_tests.py plan \
+  --repo-root /repo \
+  --source-project /repo/src/MyProduct/MyProduct.csproj \
+  --test-project /repo/tests/MyProduct.UnitTests/MyProduct.UnitTests.csproj \
+  --artifacts-dir /repo/.project-unit-testgen-artifacts
+```
+
+### Run planning + implementation
+
+```bash
+python3 generate_project_unit_tests.py run \
+  --repo-root /repo \
+  --source-project /repo/src/MyProduct/MyProduct.csproj \
+  --test-project /repo/tests/MyProduct.UnitTests/MyProduct.UnitTests.csproj \
+  --artifacts-dir /repo/.project-unit-testgen-artifacts
+```
+
+### Resume interrupted run
+
+```bash
+python3 generate_project_unit_tests.py resume \
+  --repo-root /repo \
+  --source-project /repo/src/MyProduct/MyProduct.csproj \
+  --test-project /repo/tests/MyProduct.UnitTests/MyProduct.UnitTests.csproj \
+  --artifacts-dir /repo/.project-unit-testgen-artifacts
+```
+
+If `--test-project` is omitted, the script tries to auto-detect a matching `*.Tests` or `*.UnitTests` project inside the repository.

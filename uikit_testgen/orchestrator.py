@@ -5,9 +5,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from testgen_shared.qwen import QwenRunResult, run_qwen
+
 from .discovery import build_fingerprint, discover_controls, manifest_to_json
 from .models import ControlManifest, ControlProgress, ControlResult, RunConfig, utc_now_iso
-from .qwen import QwenRunResult, run_qwen
 
 
 class Orchestrator:
