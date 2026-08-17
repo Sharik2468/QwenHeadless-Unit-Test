@@ -80,13 +80,19 @@ def run_qwen(
     if resume_session_id:
         command.extend(["--resume", resume_session_id])
 
-    completed = subprocess.run(
-        command,
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Could not start Qwen executable '{qwen_bin}'. Make sure it is installed, available in PATH, "
+            f"or pass an explicit path with --qwen-bin."
+        ) from exc
     output_path.write_text(completed.stdout, encoding="utf-8")
     session_id, assistant_messages, raw_events = _parse_json_output(completed.stdout)
     return QwenRunResult(

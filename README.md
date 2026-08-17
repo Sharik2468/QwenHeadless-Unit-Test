@@ -119,6 +119,19 @@ python3 scripts/install_offline_packages.py \
 
 If your environment uses `python` instead of `python3`, replace the executable accordingly. The helper scripts themselves use whichever Python executable you launch them with unless you pass `--python`.
 
+## Qwen executable note
+
+The generator scripts expect the `qwen` CLI to be available in your system `PATH`.
+
+If it is installed in a custom location, pass it explicitly:
+
+```bash
+python3 generate_uikit_tests.py run \
+  --repo-root /repo \
+  --artifacts-dir /repo/.uikit-testgen-artifacts \
+  --qwen-bin /full/path/to/qwen
+```
+
 ## Generic project unit-test orchestrator
 
 This repository also includes a second CLI for classic unit tests in one specific .NET source project:
