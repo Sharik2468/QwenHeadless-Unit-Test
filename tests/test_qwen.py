@@ -50,8 +50,8 @@ class QwenOutputParsingTests(unittest.TestCase):
                         model="qwen3-coder-plus",
                         approval_mode="yolo",
                         max_session_turns=1,
-                        max_wall_time="1m",
-                        max_tool_calls=1,
+                        max_wall_time=None,
+                        max_tool_calls=None,
                         output_path=output_path,
                     )
 
@@ -76,8 +76,8 @@ class QwenOutputParsingTests(unittest.TestCase):
                         model="qwen3-coder-plus",
                         approval_mode="yolo",
                         max_session_turns=1,
-                        max_wall_time="1m",
-                        max_tool_calls=1,
+                        max_wall_time=None,
+                        max_tool_calls=None,
                         output_path=output_path,
                     )
 
@@ -98,8 +98,8 @@ class QwenOutputParsingTests(unittest.TestCase):
                     model="qwen3.6-27b-fp8",
                     approval_mode="yolo",
                     max_session_turns=1,
-                    max_wall_time="1m",
-                    max_tool_calls=1,
+                    max_wall_time=None,
+                    max_tool_calls=None,
                     output_path=output_path,
                 )
 
@@ -111,8 +111,8 @@ class QwenOutputParsingTests(unittest.TestCase):
             model="qwen3.6-27b-fp8",
             approval_mode="yolo",
             max_session_turns=10,
-            max_wall_time="5m",
-            max_tool_calls=20,
+            max_wall_time=None,
+            max_tool_calls=None,
         )
 
         self.assertIn("-y", command)

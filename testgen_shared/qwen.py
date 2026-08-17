@@ -56,8 +56,8 @@ def run_qwen(
     model: str,
     approval_mode: str,
     max_session_turns: int,
-    max_wall_time: str,
-    max_tool_calls: int,
+    max_wall_time: str | None,
+    max_tool_calls: int | None,
     output_path: Path,
     resume_session_id: str | None = None,
 ) -> QwenRunResult:
@@ -113,8 +113,8 @@ def build_qwen_command(
     model: str,
     approval_mode: str,
     max_session_turns: int,
-    max_wall_time: str,
-    max_tool_calls: int,
+    max_wall_time: str | None,
+    max_tool_calls: int | None,
     resume_session_id: str | None = None,
 ) -> list[str]:
     command = [
@@ -125,11 +125,11 @@ def build_qwen_command(
         model,
         "--max-session-turns",
         str(max_session_turns),
-        "--max-wall-time",
-        str(max_wall_time),
-        "--max-tool-calls",
-        str(max_tool_calls),
     ]
+    if max_wall_time is not None:
+        command.extend(["--max-wall-time", str(max_wall_time)])
+    if max_tool_calls is not None:
+        command.extend(["--max-tool-calls", str(max_tool_calls)])
     if approval_mode == "yolo":
         command.append("-y")
     else:

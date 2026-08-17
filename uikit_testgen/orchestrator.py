@@ -183,8 +183,6 @@ class Orchestrator:
                 qwen_output_path,
                 resume_session_id=repair_session_id,
                 session_turns=15,
-                wall_time="10m",
-                tool_calls=30,
             )
             repair_session_id = qwen_result.session_id or repair_session_id
 

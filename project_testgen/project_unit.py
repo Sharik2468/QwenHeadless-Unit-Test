@@ -26,8 +26,8 @@ class ProjectUnitConfig:
     max_candidates: int = 10
     max_repair_attempts: int = 3
     max_session_turns: int = 30
-    max_wall_time: str = "15m"
-    max_tool_calls: int = 50
+    max_wall_time: str | None = None
+    max_tool_calls: int | None = None
     test_filter_template: str = "FullyQualifiedName~{candidate}"
 
     def to_dict(self) -> dict[str, Any]:
@@ -186,8 +186,6 @@ class ProjectUnitOrchestrator:
                 output_path=qwen_output_path,
                 resume_session_id=session_id,
                 max_session_turns=15,
-                max_wall_time="10m",
-                max_tool_calls=30,
             )
             session_id = qwen_result.session_id or session_id
 
