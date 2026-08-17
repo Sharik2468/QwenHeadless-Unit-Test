@@ -19,7 +19,7 @@ Python orchestration script for generating and maintaining Avalonia UIKit unit/h
 ### Discover controls
 
 ```bash
-python generate_uikit_tests.py discover \
+python3 generate_uikit_tests.py discover \
   --repo-root /repo \
   --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
   --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
@@ -31,7 +31,7 @@ python generate_uikit_tests.py discover \
 ### Run end-to-end orchestration
 
 ```bash
-python generate_uikit_tests.py run \
+python3 generate_uikit_tests.py run \
   --repo-root /repo \
   --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
   --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
@@ -45,7 +45,7 @@ python generate_uikit_tests.py run \
 ### Resume interrupted work
 
 ```bash
-python generate_uikit_tests.py resume \
+python3 generate_uikit_tests.py resume \
   --repo-root /repo \
   --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
   --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
@@ -55,7 +55,7 @@ python generate_uikit_tests.py resume \
 ### Recheck existing tests
 
 ```bash
-python generate_uikit_tests.py recheck \
+python3 generate_uikit_tests.py recheck \
   --repo-root /repo \
   --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
   --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
@@ -77,5 +77,5 @@ under the configured `artifacts-dir`.
 ## Local verification
 
 ```bash
-python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
