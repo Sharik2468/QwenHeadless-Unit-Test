@@ -9,6 +9,16 @@ from uikit_testgen.models import RunConfig
 from uikit_testgen.orchestrator import Orchestrator
 
 
+DEFAULT_LAYOUT = {
+    "unit_tests_project": Path("Avalonia/NSCore.UIKit.Controls.UnitTests/NSCore.UIKit.Controls.UnitTests.csproj"),
+    "headless_tests_project": Path(
+        "Avalonia/NSCore.UIKit.Headless.XUnit.UnitTests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj"
+    ),
+    "styles_root": Path("Avalonia/NSCore.Avalonia.Theme/Controls"),
+    "custom_controls_root": Path("Avalonia/NSCore.Avalonia.Theme/Controls"),
+}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Discover Avalonia UIKit controls and orchestrate Qwen headless test generation."
@@ -24,8 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def add_shared_arguments(parser: argparse.ArgumentParser, include_optional_roots: bool) -> None:
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--unit-tests-project", type=Path, required=True)
-    parser.add_argument("--headless-tests-project", type=Path, required=True)
+    parser.add_argument("--unit-tests-project", type=Path)
+    parser.add_argument("--headless-tests-project", type=Path)
     parser.add_argument("--artifacts-dir", type=Path, required=True)
     parser.add_argument("--qwen-bin", default="qwen")
     parser.add_argument("--model", default="qwen3-coder-plus")
@@ -42,21 +52,42 @@ def add_shared_arguments(parser: argparse.ArgumentParser, include_optional_roots
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     if include_optional_roots:
-        parser.add_argument("--styles-root", type=Path, required=True)
+        parser.add_argument("--styles-root", type=Path)
         parser.add_argument("--custom-controls-root", type=Path)
     else:
         parser.add_argument("--styles-root", type=Path, required=False)
         parser.add_argument("--custom-controls-root", type=Path, required=False)
 
 
+def resolve_layout_path(repo_root: Path, explicit: Path | None, key: str) -> Path:
+    if explicit is not None:
+        return explicit
+    candidate = repo_root / DEFAULT_LAYOUT[key]
+    if candidate.exists():
+        return candidate
+    raise ValueError(
+        f"Could not resolve '{key}'. Pass the corresponding CLI argument explicitly or use a repo with the expected layout."
+    )
+
+
 def build_config(args: argparse.Namespace) -> RunConfig:
-    styles_root = args.styles_root or args.repo_root
+    unit_tests_project = resolve_layout_path(args.repo_root, args.unit_tests_project, "unit_tests_project")
+    headless_tests_project = resolve_layout_path(
+        args.repo_root,
+        args.headless_tests_project,
+        "headless_tests_project",
+    )
+    styles_root = resolve_layout_path(args.repo_root, args.styles_root, "styles_root")
+    custom_controls_root = args.custom_controls_root
+    if custom_controls_root is None:
+        default_custom_root = args.repo_root / DEFAULT_LAYOUT["custom_controls_root"]
+        custom_controls_root = default_custom_root if default_custom_root.exists() else styles_root
     return RunConfig(
         repo_root=args.repo_root,
-        unit_tests_project=args.unit_tests_project,
-        headless_tests_project=args.headless_tests_project,
+        unit_tests_project=unit_tests_project,
+        headless_tests_project=headless_tests_project,
         styles_root=styles_root,
-        custom_controls_root=args.custom_controls_root,
+        custom_controls_root=custom_controls_root,
         artifacts_dir=args.artifacts_dir,
         qwen_bin=args.qwen_bin,
         model=args.model,

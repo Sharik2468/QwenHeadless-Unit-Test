@@ -16,15 +16,17 @@ Python orchestration script for generating and maintaining Avalonia UIKit unit/h
 
 ## Commands
 
+If your repository matches the NSCore UIKit Avalonia layout shown below, the script can auto-detect these paths from `--repo-root`:
+
+- `Avalonia/NSCore.UIKit.Controls.UnitTests/NSCore.UIKit.Controls.UnitTests.csproj`
+- `Avalonia/NSCore.UIKit.Headless.XUnit.UnitTests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj`
+- `Avalonia/NSCore.Avalonia.Theme/Controls`
+
 ### Discover controls
 
 ```bash
 python3 generate_uikit_tests.py discover \
   --repo-root /repo \
-  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
-  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
-  --styles-root /repo/NSCore.Avalonia.Theme/Controls \
-  --custom-controls-root /repo/UIKit/Controls \
   --artifacts-dir /repo/.uikit-testgen-artifacts
 ```
 
@@ -33,10 +35,6 @@ python3 generate_uikit_tests.py discover \
 ```bash
 python3 generate_uikit_tests.py run \
   --repo-root /repo \
-  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
-  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
-  --styles-root /repo/NSCore.Avalonia.Theme/Controls \
-  --custom-controls-root /repo/UIKit/Controls \
   --artifacts-dir /repo/.uikit-testgen-artifacts \
   --model qwen3-coder-plus \
   --max-repair-attempts 3
@@ -47,8 +45,6 @@ python3 generate_uikit_tests.py run \
 ```bash
 python3 generate_uikit_tests.py resume \
   --repo-root /repo \
-  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
-  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
   --artifacts-dir /repo/.uikit-testgen-artifacts
 ```
 
@@ -57,10 +53,6 @@ python3 generate_uikit_tests.py resume \
 ```bash
 python3 generate_uikit_tests.py recheck \
   --repo-root /repo \
-  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
-  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
-  --styles-root /repo/NSCore.Avalonia.Theme/Controls \
-  --custom-controls-root /repo/UIKit/Controls \
   --artifacts-dir /repo/.uikit-testgen-artifacts
 ```
 

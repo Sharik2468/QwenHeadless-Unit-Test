@@ -25,8 +25,12 @@ class ControlManifest:
     name: str
     kind: str
     style_dir: Path
+    relative_dir: str
+    group_name: str
     theme_file: Path | None = None
+    theme_files: list[Path] = field(default_factory=list)
     aggregate_file: Path | None = None
+    aggregate_files: list[Path] = field(default_factory=list)
     resource_files: list[Path] = field(default_factory=list)
     token_files: list[Path] = field(default_factory=list)
     custom_code_files: list[Path] = field(default_factory=list)

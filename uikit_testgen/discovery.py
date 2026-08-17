@@ -17,6 +17,8 @@ AXAML_SUFFIXES = (
     "DarkResources.axaml",
 )
 
+INFRASTRUCTURE_DIR_NAMES = {"resources", "presenters"}
+
 
 def _is_candidate_file(path: Path) -> bool:
     if path.suffix.lower() == ".cs" and path.name.endswith("Tokens.cs"):
@@ -75,12 +77,19 @@ def discover_controls(
 
     manifests: list[ControlManifest] = []
     for directory, files in sorted(grouped.items()):
+        if directory == styles_root:
+            continue
         control_name = directory.name
+        if control_name.lower() in INFRASTRUCTURE_DIR_NAMES:
+            continue
         if not fnmatch.fnmatch(control_name, include_pattern):
             continue
         if any(fnmatch.fnmatch(control_name, pattern) for pattern in exclude_patterns):
             continue
 
+        relative_parts = directory.relative_to(styles_root).parts
+        relative_dir = "/".join(relative_parts)
+        group_name = relative_parts[0]
         theme_files = sorted([path for path in files if path.name.endswith("Theme.axaml")])
         aggregate_candidates = sorted(
             [
@@ -103,15 +112,19 @@ def discover_controls(
         custom_code_files = _find_matching_custom_files(control_name, custom_controls_root)
         related_files = sorted({*files, *custom_code_files})
 
-        if not theme_files and not aggregate_candidates and not custom_code_files:
+        if not theme_files and not token_files and not custom_code_files:
             continue
 
         manifest = ControlManifest(
             name=control_name,
             kind="custom_control" if custom_code_files else "styled_control",
             style_dir=directory,
+            relative_dir=relative_dir,
+            group_name=group_name,
             theme_file=_pick_primary_file(theme_files, f"{control_name}Theme.axaml"),
+            theme_files=theme_files,
             aggregate_file=_pick_primary_file(aggregate_candidates, f"{control_name}.axaml"),
+            aggregate_files=aggregate_candidates,
             resource_files=resource_files,
             token_files=token_files,
             custom_code_files=custom_code_files,

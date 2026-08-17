@@ -14,13 +14,17 @@ class DiscoveryTests(unittest.TestCase):
             styles_root = root / "Controls"
             button_dir = styles_root / "Button"
             icon_button_dir = button_dir / "IconButton"
+            resources_dir = styles_root / "Resources"
             button_dir.mkdir(parents=True)
             icon_button_dir.mkdir(parents=True)
+            resources_dir.mkdir(parents=True)
 
+            (styles_root / "Controls.axaml").write_text("<ResourceDictionary />", encoding="utf-8")
             (button_dir / "ButtonTheme.axaml").write_text("<Styles />", encoding="utf-8")
             (button_dir / "Button.axaml").write_text("<ResourceDictionary />", encoding="utf-8")
             (button_dir / "ButtonResources.axaml").write_text("<ResourceDictionary />", encoding="utf-8")
             (icon_button_dir / "IconButtonTheme.axaml").write_text("<Styles />", encoding="utf-8")
+            (resources_dir / "InputTokens.cs").write_text("class Tokens {}", encoding="utf-8")
 
             manifests = discover_controls(styles_root)
 
@@ -29,6 +33,8 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(button_manifest.theme_file.name, "ButtonTheme.axaml")
             self.assertEqual(button_manifest.aggregate_file.name, "Button.axaml")
             self.assertEqual(len(button_manifest.resource_files), 1)
+            self.assertEqual(button_manifest.relative_dir, "Button")
+            self.assertEqual(button_manifest.group_name, "Button")
 
     def test_discover_controls_attaches_matching_custom_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -50,6 +56,7 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(len(manifests), 1)
             self.assertEqual(manifests[0].kind, "custom_control")
             self.assertEqual([path.name for path in manifests[0].custom_code_files], ["TimeBox.cs"])
+            self.assertEqual(manifests[0].relative_dir, "TimeBox")
 
     def test_fingerprint_changes_when_related_file_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
