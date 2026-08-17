@@ -1,1 +1,81 @@
 # QwenHeadless-Unit-Test
+
+Python orchestration script for generating and maintaining Avalonia UIKit unit/headless tests with Qwen Code headless.
+
+## What it does
+
+- recursively discovers candidate controls from a styles root
+- optionally matches custom control `.cs` files from a separate source root
+- writes a control manifest for repeatable processing
+- runs one Qwen headless session per control
+- asks Qwen to generate or update unit/headless tests
+- runs `dotnet build` and `dotnet test` after each control
+- retries failed controls with repair prompts
+- persists run state so the pipeline can be resumed later
+- rechecks previously generated tests on repeated runs
+
+## Commands
+
+### Discover controls
+
+```bash
+python generate_uikit_tests.py discover \
+  --repo-root /repo \
+  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
+  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
+  --styles-root /repo/NSCore.Avalonia.Theme/Controls \
+  --custom-controls-root /repo/UIKit/Controls \
+  --artifacts-dir /repo/.uikit-testgen-artifacts
+```
+
+### Run end-to-end orchestration
+
+```bash
+python generate_uikit_tests.py run \
+  --repo-root /repo \
+  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
+  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
+  --styles-root /repo/NSCore.Avalonia.Theme/Controls \
+  --custom-controls-root /repo/UIKit/Controls \
+  --artifacts-dir /repo/.uikit-testgen-artifacts \
+  --model qwen3-coder-plus \
+  --max-repair-attempts 3
+```
+
+### Resume interrupted work
+
+```bash
+python generate_uikit_tests.py resume \
+  --repo-root /repo \
+  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
+  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
+  --artifacts-dir /repo/.uikit-testgen-artifacts
+```
+
+### Recheck existing tests
+
+```bash
+python generate_uikit_tests.py recheck \
+  --repo-root /repo \
+  --unit-tests-project /repo/tests/NSCore.UIKit.Controls.UnitTests.csproj \
+  --headless-tests-project /repo/tests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj \
+  --styles-root /repo/NSCore.Avalonia.Theme/Controls \
+  --custom-controls-root /repo/UIKit/Controls \
+  --artifacts-dir /repo/.uikit-testgen-artifacts
+```
+
+## Artifacts
+
+The script writes:
+
+- `controls_manifest.json`
+- `progress.json`
+- per-control prompts, Qwen outputs, build/test logs, and `result.json`
+
+under the configured `artifacts-dir`.
+
+## Local verification
+
+```bash
+python -m unittest discover -s tests -v
+```
