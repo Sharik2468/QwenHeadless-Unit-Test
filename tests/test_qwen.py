@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from testgen_shared.qwen import _parse_json_output, run_qwen
+from testgen_shared.qwen import _parse_json_output, build_qwen_command, run_qwen
 
 
 class QwenOutputParsingTests(unittest.TestCase):
@@ -80,6 +80,20 @@ class QwenOutputParsingTests(unittest.TestCase):
                         max_tool_calls=1,
                         output_path=output_path,
                     )
+
+    def test_build_qwen_command_uses_yolo_switch_for_yolo_mode(self) -> None:
+        command = build_qwen_command(
+            qwen_bin="qwen",
+            prompt="test",
+            model="qwen3.6-27b-fp8",
+            approval_mode="yolo",
+            max_session_turns=10,
+            max_wall_time="5m",
+            max_tool_calls=20,
+        )
+
+        self.assertIn("-y", command)
+        self.assertNotIn("--approval-mode", command)
 
 
 if __name__ == "__main__":

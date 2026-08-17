@@ -61,25 +61,16 @@ def run_qwen(
     output_path: Path,
     resume_session_id: str | None = None,
 ) -> QwenRunResult:
-    command = [
-        qwen_bin,
-        "-p",
-        prompt,
-        "--output-format",
-        "json",
-        "--model",
-        model,
-        "--approval-mode",
-        approval_mode,
-        "--max-session-turns",
-        str(max_session_turns),
-        "--max-wall-time",
-        str(max_wall_time),
-        "--max-tool-calls",
-        str(max_tool_calls),
-    ]
-    if resume_session_id:
-        command.extend(["--resume", resume_session_id])
+    command = build_qwen_command(
+        qwen_bin=qwen_bin,
+        prompt=prompt,
+        model=model,
+        approval_mode=approval_mode,
+        max_session_turns=max_session_turns,
+        max_wall_time=max_wall_time,
+        max_tool_calls=max_tool_calls,
+        resume_session_id=resume_session_id,
+    )
 
     try:
         completed = subprocess.run(
@@ -115,3 +106,37 @@ def run_qwen(
         assistant_messages=assistant_messages,
         raw_events=raw_events,
     )
+
+
+def build_qwen_command(
+    qwen_bin: str,
+    prompt: str,
+    model: str,
+    approval_mode: str,
+    max_session_turns: int,
+    max_wall_time: str,
+    max_tool_calls: int,
+    resume_session_id: str | None = None,
+) -> list[str]:
+    command = [
+        qwen_bin,
+        "-p",
+        prompt,
+        "--output-format",
+        "json",
+        "--model",
+        model,
+        "--max-session-turns",
+        str(max_session_turns),
+        "--max-wall-time",
+        str(max_wall_time),
+        "--max-tool-calls",
+        str(max_tool_calls),
+    ]
+    if approval_mode == "yolo":
+        command.append("-y")
+    else:
+        command.extend(["--approval-mode", approval_mode])
+    if resume_session_id:
+        command.extend(["--resume", resume_session_id])
+    return command
