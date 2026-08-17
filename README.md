@@ -72,6 +72,53 @@ under the configured `artifacts-dir`.
 python3 -m unittest discover -s tests -v
 ```
 
+## Offline Python dependency workflow
+
+This repository now includes a minimal offline dependency workflow for environments without internet access.
+
+### Files
+
+- `requirements.txt`
+- `scripts/download_offline_packages.py`
+- `scripts/install_offline_packages.py`
+- `.resources/packages/`
+
+### Download packages on a machine with internet
+
+```bash
+python3 scripts/download_offline_packages.py
+```
+
+By default this downloads packages from `requirements.txt` into:
+
+```text
+.resources/packages
+```
+
+You can override both paths:
+
+```bash
+python3 scripts/download_offline_packages.py \
+  --requirements requirements.txt \
+  --dest .resources/packages
+```
+
+### Install packages on a machine without internet
+
+```bash
+python3 scripts/install_offline_packages.py
+```
+
+Equivalent explicit command:
+
+```bash
+python3 scripts/install_offline_packages.py \
+  --requirements requirements.txt \
+  --packages .resources/packages
+```
+
+If your environment uses `python` instead of `python3`, replace the executable accordingly. The helper scripts themselves use whichever Python executable you launch them with unless you pass `--python`.
+
 ## Generic project unit-test orchestrator
 
 This repository also includes a second CLI for classic unit tests in one specific .NET source project:
