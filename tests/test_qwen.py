@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from uikit_testgen.qwen import _parse_json_output
+from testgen_shared.qwen import _parse_json_output
 
 
 class QwenOutputParsingTests(unittest.TestCase):

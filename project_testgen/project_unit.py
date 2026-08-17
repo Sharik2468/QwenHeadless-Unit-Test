@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .models import utc_now_iso
-from .qwen import QwenRunResult, run_qwen
+from testgen_shared.qwen import QwenRunResult, run_qwen
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 @dataclass(slots=True)

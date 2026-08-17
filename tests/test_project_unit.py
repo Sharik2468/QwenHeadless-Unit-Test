@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from generate_project_unit_tests import build_config, build_parser
-from uikit_testgen.project_unit import autodetect_test_project
+from project_testgen.project_unit import autodetect_test_project
 
 
 class ProjectUnitTests(unittest.TestCase):

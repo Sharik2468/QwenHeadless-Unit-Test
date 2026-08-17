@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from uikit_testgen.project_unit import (
+from project_testgen.project_unit import (
     ProjectUnitConfig,
     ProjectUnitOrchestrator,
     autodetect_test_project,
