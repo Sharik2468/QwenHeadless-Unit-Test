@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ def _parse_json_output(stdout: str) -> tuple[str | None, list[str], list[dict[st
     if not stripped:
         return session_id, assistant_messages, raw_events
 
-    payload = json.loads(stripped)
+    payload = json.loads(stripped.lstrip("\ufeff"))
     if not isinstance(payload, list):
         return session_id, assistant_messages, raw_events
 
@@ -94,7 +95,18 @@ def run_qwen(
             f"or pass an explicit path with --qwen-bin."
         ) from exc
     output_path.write_text(completed.stdout, encoding="utf-8")
-    session_id, assistant_messages, raw_events = _parse_json_output(completed.stdout)
+    stderr_path = output_path.with_suffix(".stderr.txt")
+    stderr_path.write_text(completed.stderr, encoding="utf-8")
+    try:
+        session_id, assistant_messages, raw_events = _parse_json_output(completed.stdout)
+    except JSONDecodeError as exc:
+        stdout_excerpt = completed.stdout[:1000].strip()
+        stderr_excerpt = completed.stderr[:1000].strip()
+        raise RuntimeError(
+            "Qwen returned non-JSON stdout despite '--output-format json'. "
+            f"See raw stdout in '{output_path}' and stderr in '{stderr_path}'. "
+            f"Stdout excerpt: {stdout_excerpt!r}. Stderr excerpt: {stderr_excerpt!r}."
+        ) from exc
     return QwenRunResult(
         returncode=completed.returncode,
         stdout=completed.stdout,

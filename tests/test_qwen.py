@@ -55,6 +55,32 @@ class QwenOutputParsingTests(unittest.TestCase):
                         output_path=output_path,
                     )
 
+    def test_run_qwen_raises_clear_error_when_stdout_is_not_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "qwen-output.json"
+
+            class Completed:
+                returncode = 0
+                stdout = "not json"
+                stderr = "warning text"
+
+            with patch("testgen_shared.qwen.subprocess.run", return_value=Completed()):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Qwen returned non-JSON stdout despite '--output-format json'",
+                ):
+                    run_qwen(
+                        qwen_bin="qwen",
+                        prompt="test",
+                        repo_root=Path(temp_dir),
+                        model="qwen3-coder-plus",
+                        approval_mode="yolo",
+                        max_session_turns=1,
+                        max_wall_time="1m",
+                        max_tool_calls=1,
+                        output_path=output_path,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
