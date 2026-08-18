@@ -209,12 +209,17 @@ class Orchestrator:
         test_ok = True
         build_attempted = False
         test_attempted = False
-        if self.config.build_after_each_control:
-            build_attempted = True
-            build_ok = self._run_builds(build_log_path)
-        if build_ok and self.config.test_after_each_control:
-            test_attempted = True
-            test_ok = self._run_tests(manifest, test_log_path)
+        should_attempt_initial_verification = not (
+            early_quality_issue == MISSING_REPORTED_TEST_FILES_REASON
+            and not self._research_has_existing_tests(research_summary)
+        )
+        if should_attempt_initial_verification:
+            if self.config.build_after_each_control:
+                build_attempted = True
+                build_ok = self._run_builds(build_log_path)
+            if build_ok and self.config.test_after_each_control:
+                test_attempted = True
+                test_ok = self._run_tests(manifest, test_log_path)
 
         if build_ok and test_ok:
             result = self._load_or_fallback_result(
@@ -450,6 +455,11 @@ class Orchestrator:
         )
         manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
         research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
+        existing_test_guidance = (
+            "Research found existing control-specific tests. You must inspect those tests against the current control/theme/resource files and update them if the behavior or expected runtime values changed."
+            if self._research_has_existing_tests(research_summary)
+            else "Research found no existing control-specific tests. Initial generation must create at least one meaningful headless runtime test file unless you can prove runtime verification is not feasible; do not leave the control unchanged on the first pass."
+        )
         unit_test_policy = (
             "This control has repository-owned custom code files, so classic unit tests for its custom logic are allowed."
             if self._should_run_unit_tests(manifest)
@@ -490,6 +500,9 @@ Projects:
 
 Unit test policy:
 {unit_test_policy}
+
+Existing test guidance:
+{existing_test_guidance}
 
 Reference files and directories to inspect before guessing APIs, control types, namespaces, or test patterns:
 {reference_section}
@@ -548,6 +561,11 @@ Return a short final summary in plain text after writing the report.
             else "- None provided."
         )
         research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
+        existing_test_guidance = (
+            "Existing control-specific tests were found during research. Re-check them against the current control files and update them if they are stale."
+            if self._research_has_existing_tests(research_summary)
+            else "Research found no existing control-specific tests. This repair pass should create meaningful headless runtime tests instead of preserving the empty state."
+        )
         return f"""Fix the generated tests for control {control_name}.
 
 Only modify tests related to {control_name}. Prefer stable assertions. If some checks are too brittle,
@@ -556,6 +574,7 @@ Do NOT degrade into tests that only check ResourceKey values, token names, or Tr
 If meaningful runtime verification cannot be restored, stop and keep the control in manual_review instead of weakening the assertions.
 Inspect any existing tests for this control before deciding that no test-file changes are needed. If the control/theme/resource files changed relative to existing coverage, update the tests accordingly.
 Only keep tests unchanged when they still match the current control behavior after inspection; in that case, set `existing_tests_preserved` to true in the report and explain what you reviewed in `notes`.
+{existing_test_guidance}
 Re-inspect these reference files/directories before guessing APIs or helper patterns:
 {reference_section}
 
@@ -685,6 +704,12 @@ Test log excerpt:
             and test_attempted
             and test_ok
         )
+
+    def _research_has_existing_tests(self, research_summary: dict[str, Any]) -> bool:
+        existing_test_files = research_summary.get("existing_test_files", [])
+        if not isinstance(existing_test_files, list):
+            return False
+        return any(str(path).strip() for path in existing_test_files)
 
     def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
         return bool(manifest.custom_code_files)

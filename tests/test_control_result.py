@@ -192,6 +192,113 @@ class ControlResultParsingTests(unittest.TestCase):
                 result_payload["notes"],
             )
 
+    def test_process_control_skips_initial_build_when_research_found_no_existing_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            repo_root.mkdir()
+            unit_project = repo_root / "tests/Unit/Unit.csproj"
+            headless_project = repo_root / "tests/Headless/Headless.csproj"
+            styles_root = repo_root / "styles"
+            style_dir = styles_root / "AdornerLayer"
+            related_file = style_dir / "AdornerLayerTheme.axaml"
+            artifacts_dir = root / "artifacts"
+            generated_test_file = headless_project.parent / "AdornerLayerTests.cs"
+
+            unit_project.parent.mkdir(parents=True)
+            headless_project.parent.mkdir(parents=True)
+            style_dir.mkdir(parents=True)
+            unit_project.write_text("<Project />", encoding="utf-8")
+            headless_project.write_text("<Project />", encoding="utf-8")
+            related_file.write_text("<Styles />", encoding="utf-8")
+
+            orchestrator = Orchestrator(
+                RunConfig(
+                    repo_root=repo_root,
+                    unit_tests_project=unit_project,
+                    headless_tests_project=headless_project,
+                    styles_root=styles_root,
+                    custom_controls_root=None,
+                    artifacts_dir=artifacts_dir,
+                    max_repair_attempts=1,
+                )
+            )
+            manifest = ControlManifest(
+                name="AdornerLayer",
+                kind="styled_control",
+                style_dir=style_dir,
+                relative_dir="AdornerLayer",
+                group_name="AdornerLayer",
+                related_files=[related_file],
+            )
+            report_path = artifacts_dir / "controls" / "AdornerLayer" / "result.json"
+            initial_result = QwenRunResult(
+                returncode=0,
+                stdout="[]",
+                stderr="",
+                session_id="session-initial",
+                assistant_messages=["Need to create tests."],
+                raw_events=[],
+            )
+            repair_result = QwenRunResult(
+                returncode=0,
+                stdout="[]",
+                stderr="",
+                session_id="session-repair",
+                assistant_messages=["Created headless tests."],
+                raw_events=[],
+            )
+
+            generation_count = {"value": 0}
+
+            def fake_invoke_generation(*args, **kwargs):
+                generation_count["value"] += 1
+                if generation_count["value"] == 1:
+                    return initial_result
+
+                generated_test_file.write_text(
+                    "await WaitForLayoutAndRender();\n_window.Show();\n",
+                    encoding="utf-8",
+                )
+                report_path.parent.mkdir(parents=True, exist_ok=True)
+                report_path.write_text(
+                    json.dumps(
+                        {
+                            "control": "AdornerLayer",
+                            "status": "partial",
+                            "created_tests": ["AdornerLayerTests.cs"],
+                            "updated_tests": [],
+                            "notes": ["Created runtime headless coverage."],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return repair_result
+
+            with (
+                patch.object(
+                    orchestrator,
+                    "_ensure_research_summary",
+                    return_value={"summary": "ok", "existing_test_files": []},
+                ),
+                patch.object(orchestrator, "_build_generation_prompt", return_value="prompt"),
+                patch.object(orchestrator, "_build_repair_prompt", return_value="repair"),
+                patch.object(orchestrator, "_invoke_generation", side_effect=fake_invoke_generation),
+                patch.object(orchestrator, "_run_builds", return_value=True) as mocked_builds,
+                patch.object(orchestrator, "_run_tests", return_value=True) as mocked_tests,
+            ):
+                orchestrator._process_control(manifest, {"controls": {}})
+
+            self.assertEqual(generation_count["value"], 2)
+            mocked_builds.assert_called_once()
+            mocked_tests.assert_called_once()
+
+            result_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(result_payload["status"], "verified")
+            self.assertEqual(result_payload["created_tests"], ["AdornerLayerTests.cs"])
+            self.assertTrue(result_payload["build"]["attempted"])
+            self.assertTrue(result_payload["test_run"]["attempted"])
+
 
 if __name__ == "__main__":
     unittest.main()
