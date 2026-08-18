@@ -103,6 +103,9 @@ class Orchestrator:
         control_dir = self.config.artifacts_dir / "controls" / manifest.name
         control_dir.mkdir(parents=True, exist_ok=True)
         report_path = control_dir / "result.json"
+        research_summary_path = control_dir / "research_summary.json"
+        research_prompt_path = control_dir / "research_prompt.txt"
+        research_output_path = control_dir / "research-qwen-output.json"
         prompt_path = control_dir / "prompt.txt"
         qwen_output_path = control_dir / "qwen-output.json"
         build_log_path = control_dir / "build.log"
@@ -140,9 +143,15 @@ class Orchestrator:
                 self._set_control_status(progress, manifest.name, verify_result.status, "recheck")
                 return
 
-        prompt = self._build_generation_prompt(manifest, report_path)
+        research_summary = self._ensure_research_summary(
+            manifest=manifest,
+            research_summary_path=research_summary_path,
+            research_prompt_path=research_prompt_path,
+            research_output_path=research_output_path,
+        )
+        prompt = self._build_generation_prompt(manifest, report_path, research_summary)
         prompt_path.write_text(prompt, encoding="utf-8")
-        qwen_result = self._invoke_generation(manifest.name, prompt, qwen_output_path, control_progress.session_id)
+        qwen_result = self._invoke_generation(manifest.name, prompt, qwen_output_path)
         control_progress.session_id = qwen_result.session_id or control_progress.session_id
         progress["controls"][manifest.name] = control_progress.to_dict()
         self._save_progress(progress)
@@ -229,7 +238,6 @@ class Orchestrator:
             self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
             return
 
-        repair_session_id = control_progress.session_id
         result = None
         for attempt in range(1, self.config.max_repair_attempts + 1):
             progress["controls"][manifest.name]["attempt"] = attempt
@@ -238,6 +246,7 @@ class Orchestrator:
             self._save_progress(progress)
             repair_prompt = self._build_repair_prompt(
                 manifest.name,
+                research_summary,
                 build_log_path.read_text(encoding="utf-8", errors="ignore") if build_log_path.exists() else "",
                 test_log_path.read_text(encoding="utf-8", errors="ignore") if test_log_path.exists() else "",
             )
@@ -246,10 +255,11 @@ class Orchestrator:
                 manifest.name,
                 repair_prompt,
                 qwen_output_path,
-                resume_session_id=repair_session_id,
                 session_turns=15,
             )
-            repair_session_id = qwen_result.session_id or repair_session_id
+            control_progress.session_id = qwen_result.session_id or control_progress.session_id
+            progress["controls"][manifest.name] = control_progress.to_dict()
+            self._save_progress(progress)
             early_quality_issue = self._evaluate_generated_test_quality(
                 self._load_or_fallback_result(
                     report_path,
@@ -285,7 +295,7 @@ class Orchestrator:
                 )
                 self._apply_execution_outcome(result, build_ok=False, test_ok=False, build_log_path=build_log_path, test_log_path=test_log_path)
                 self._write_result(report_path, result)
-                self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", repair_session_id)
+                self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                 return
 
             build_ok = self._run_builds(build_log_path)
@@ -321,11 +331,11 @@ class Orchestrator:
                         "Result rejected by runtime quality guardrail instead of being marked verified."
                     )
                     self._write_result(report_path, result)
-                    self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", repair_session_id)
+                    self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                     return
                 result.status = "verified"
                 self._write_result(report_path, result)
-                self._set_control_status(progress, manifest.name, "verified", "completed", repair_session_id)
+                self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
                 return
 
         result = self._load_or_fallback_result(
@@ -347,7 +357,7 @@ class Orchestrator:
         result.status = "manual_review"
         result.notes.append("Automatic repair attempts exhausted.")
         self._write_result(report_path, result)
-        self._set_control_status(progress, manifest.name, "manual_review", "failed", repair_session_id)
+        self._set_control_status(progress, manifest.name, "manual_review", "failed", control_progress.session_id)
 
     def _invoke_generation(
         self,
@@ -373,7 +383,12 @@ class Orchestrator:
             include_directories=self._extra_include_directories(),
         )
 
-    def _build_generation_prompt(self, manifest: ControlManifest, report_path: Path) -> str:
+    def _build_generation_prompt(
+        self,
+        manifest: ControlManifest,
+        report_path: Path,
+        research_summary: dict[str, Any],
+    ) -> str:
         relevant_files = "\n".join(f"- {path}" for path in manifest.related_files)
         reference_paths = self._gather_reference_paths()
         reference_section = (
@@ -382,6 +397,7 @@ class Orchestrator:
             else "- None provided."
         )
         manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
+        research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
         unit_test_policy = (
             "This control has repository-owned custom code files, so classic unit tests for its custom logic are allowed."
             if self._should_run_unit_tests(manifest)
@@ -424,6 +440,9 @@ Unit test policy:
 Reference files and directories to inspect before guessing APIs, control types, namespaces, or test patterns:
 {reference_section}
 
+Research summary from a separate exploration session:
+{research_summary_json}
+
 Tasks:
 1. Analyze the target control.
 2. Decide which tests are appropriate:
@@ -459,13 +478,20 @@ Tests that only validate ResourceKey values or typed token constant names are in
 Return a short final summary in plain text after writing the report.
 """
 
-    def _build_repair_prompt(self, control_name: str, build_log: str, test_log: str) -> str:
+    def _build_repair_prompt(
+        self,
+        control_name: str,
+        research_summary: dict[str, Any],
+        build_log: str,
+        test_log: str,
+    ) -> str:
         reference_paths = self._gather_reference_paths()
         reference_section = (
             "\n".join(f"- {path}" for path in reference_paths)
             if reference_paths
             else "- None provided."
         )
+        research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
         return f"""Fix the generated tests for control {control_name}.
 
 Only modify tests related to {control_name}. Prefer stable assertions. If some checks are too brittle,
@@ -474,6 +500,9 @@ Do NOT degrade into tests that only check ResourceKey values, token names, or Tr
 If meaningful runtime verification cannot be restored, stop and keep the control in manual_review instead of weakening the assertions.
 Re-inspect these reference files/directories before guessing APIs or helper patterns:
 {reference_section}
+
+Reuse this research summary instead of re-reading broad source trees unless absolutely necessary:
+{research_summary_json}
 
 Build log excerpt:
 {build_log[-12000:]}
@@ -607,6 +636,86 @@ Test log excerpt:
             "log_file": str(test_log_path),
             "failed_tests": [],
         }
+
+    def _ensure_research_summary(
+        self,
+        manifest: ControlManifest,
+        research_summary_path: Path,
+        research_prompt_path: Path,
+        research_output_path: Path,
+    ) -> dict[str, Any]:
+        if research_summary_path.exists():
+            return json.loads(research_summary_path.read_text(encoding="utf-8"))
+
+        prompt = self._build_research_prompt(manifest, research_summary_path)
+        research_prompt_path.write_text(prompt, encoding="utf-8")
+        qwen_result = self._invoke_generation(
+            manifest.name,
+            prompt,
+            research_output_path,
+            session_turns=12,
+        )
+        if not research_summary_path.exists():
+            fallback = {
+                "control": manifest.name,
+                "status": "partial",
+                "summary": qwen_result.assistant_messages[-1] if qwen_result.assistant_messages else "",
+                "control_type": None,
+                "allowed_test_projects": ["headless"] if not self._should_run_unit_tests(manifest) else ["headless", "unit"],
+                "must_verify": [],
+                "avoid": ["Do not invent APIs or namespaces."],
+            }
+            research_summary_path.write_text(json.dumps(fallback, indent=2, ensure_ascii=False), encoding="utf-8")
+        return json.loads(research_summary_path.read_text(encoding="utf-8"))
+
+    def _build_research_prompt(self, manifest: ControlManifest, research_summary_path: Path) -> str:
+        reference_paths = self._gather_reference_paths()
+        reference_section = (
+            "\n".join(f"- {path}" for path in reference_paths)
+            if reference_paths
+            else "- None provided."
+        )
+        manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
+        unit_test_policy = (
+            "Unit tests for repository-owned custom logic are allowed."
+            if self._should_run_unit_tests(manifest)
+            else "Do NOT plan classic unit tests in the unit test project for this control; it has no repository-owned custom code files."
+        )
+        return f"""You are the research phase for one Avalonia UIKit control.
+
+Do NOT write tests, do NOT build projects, and do NOT modify repository files during this phase.
+Your only goal is to inspect the control, framework sources, and existing test helpers so the implementation phase can start from a compact, grounded summary instead of guessing.
+
+Target control manifest:
+{manifest_json}
+
+Reference files and directories to inspect as needed:
+{reference_section}
+
+Unit test policy:
+{unit_test_policy}
+
+Research output requirements:
+- Write a JSON summary file to:
+{research_summary_path}
+- The JSON must include:
+  - control
+  - status
+  - control_type
+  - relevant_reference_files
+  - allowed_test_projects
+  - must_verify
+  - avoid
+  - summary
+
+Rules:
+- Prefer narrow, concrete findings over broad narration.
+- Identify the CLR type/namespace only if you can confirm it from the inspected sources.
+- If a type/member/visual structure cannot be confirmed, list it in avoid instead of guessing.
+- Keep the summary compact so a fresh implementation session can use it without replaying all exploration context.
+
+Return a short plain-text summary after writing the JSON file.
+"""
 
     def _gather_reference_paths(self) -> list[Path]:
         auto_reference_candidates = [
