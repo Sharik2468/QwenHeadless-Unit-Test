@@ -533,6 +533,8 @@ Hard constraints:
 10. If meaningful runtime verification is not possible for a token or style binding, do not replace it with a weak string-based test. Record the gap in unresolved_issues and stop.
 11. You MUST inspect any existing tests for this control before deciding that no test-file changes are needed. Compare the current control/theme/resource files against existing tests and update those tests if the coverage is stale, incomplete, or no longer matches runtime behavior.
 12. If existing tests already cover the current control and truly do not need edits, set `existing_tests_preserved` to true in the final report and explain in `notes` what you reviewed. Do not set that flag unless you actually inspected the current control files and the existing tests.
+13. The report file MUST be valid JSON using only the canonical fields listed below. Do NOT invent alternative field names such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
+14. `notes` MUST always be a JSON array of strings. `created_tests` and `updated_tests` MUST always be JSON arrays of strings, even when empty.
 
 Target control:
 {manifest_json}
@@ -596,6 +598,23 @@ The final report JSON must include:
 - test_run
 - notes
 
+Write ONLY these canonical fields in the report JSON. Do NOT add legacy or convenience fields outside this schema.
+
+Canonical report shape example:
+{{
+  "control": "{manifest.name}",
+  "status": "verified|manual_review|partial|fixed",
+  "created_tests": [],
+  "updated_tests": [],
+  "generation_outcome": "generated_new_tests|updated_existing_tests|preserved_existing_tests|blocked_runtime_gap|generation_failed",
+  "existing_tests_preserved": false,
+  "checks_added": {{}},
+  "unresolved_issues": [],
+  "build": {{}},
+  "test_run": {{}},
+  "notes": []
+}}
+
 A generated test is only acceptable if it checks runtime-applied behavior or values on the actual control, its template, or its rendered state.
 Tests that only validate ResourceKey values or typed token constant names are invalid.
 
@@ -633,6 +652,8 @@ If meaningful runtime verification cannot be restored, stop and keep the control
 Inspect any existing tests for this control before deciding that no test-file changes are needed. If the control/theme/resource files changed relative to existing coverage, update the tests accordingly.
 Only keep tests unchanged when they still match the current control behavior after inspection; in that case, set `existing_tests_preserved` to true in the report and explain what you reviewed in `notes`.
 {existing_test_guidance}
+When you rewrite the report JSON, use ONLY the canonical fields expected by the orchestrator. Do NOT emit legacy/free-form fields such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
+`notes` must remain a JSON array of strings; do not collapse it into a single string.
 Re-inspect these reference files/directories before guessing APIs or helper patterns:
 {reference_section}
 

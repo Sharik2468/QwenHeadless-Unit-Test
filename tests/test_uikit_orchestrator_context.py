@@ -92,6 +92,8 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             self.assertIn("generation_outcome", prompt)
             self.assertIn("existing_tests_preserved", prompt)
             self.assertIn("Research next_action", prompt)
+            self.assertIn("Do NOT invent alternative field names such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`", prompt)
+            self.assertIn("`notes` MUST always be a JSON array of strings", prompt)
             self.assertIn("compare them against the current control/theme/resource files", prompt)
 
     def test_generation_prompt_requires_new_tests_when_research_found_none(self) -> None:
@@ -133,6 +135,46 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             self.assertIn("Research found no existing control-specific tests", prompt)
             self.assertIn("create_tests -> create meaningful tests", prompt)
             self.assertIn("must create at least one meaningful headless runtime test file", prompt)
+
+    def test_repair_prompt_requires_canonical_result_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifacts = root / ".artifacts"
+            styles_root = root / "Controls"
+            unit_project = root / "UnitTests/UnitTests.csproj"
+            headless_project = root / "HeadlessTests/UnitTests.csproj"
+            styles_root.mkdir(parents=True)
+            unit_project.parent.mkdir(parents=True)
+            headless_project.parent.mkdir(parents=True)
+            unit_project.write_text("<Project />", encoding="utf-8")
+            headless_project.write_text("<Project />", encoding="utf-8")
+
+            orchestrator = Orchestrator(
+                RunConfig(
+                    repo_root=root,
+                    unit_tests_project=unit_project,
+                    headless_tests_project=headless_project,
+                    styles_root=styles_root,
+                    custom_controls_root=None,
+                    artifacts_dir=artifacts,
+                )
+            )
+
+            prompt = orchestrator._build_repair_prompt(
+                SAMPLE_CONTROL,
+                {
+                    "control": {"name": SAMPLE_CONTROL},
+                    "existing_test_files": [],
+                    "existing_test_coverage": {"status": "none"},
+                    "next_action": "create_tests",
+                },
+                "build failed",
+                "tests failed",
+            )
+
+            self.assertIn("use ONLY the canonical fields expected by the orchestrator", prompt)
+            self.assertIn("Do NOT emit legacy/free-form fields such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`", prompt)
+            self.assertIn("`notes` must remain a JSON array of strings", prompt)
 
     def test_extra_include_directories_collects_external_reference_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
