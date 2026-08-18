@@ -26,8 +26,8 @@ class ProjectUnitConfig:
     max_candidates: int = 10
     max_repair_attempts: int = 3
     max_session_turns: int = 30
-    max_wall_time: str = "15m"
-    max_tool_calls: int = 50
+    max_wall_time: str | None = None
+    max_tool_calls: int | None = None
     test_filter_template: str = "FullyQualifiedName~{candidate}"
 
     def to_dict(self) -> dict[str, Any]:
@@ -186,8 +186,6 @@ class ProjectUnitOrchestrator:
                 output_path=qwen_output_path,
                 resume_session_id=session_id,
                 max_session_turns=15,
-                max_wall_time="10m",
-                max_tool_calls=30,
             )
             session_id = qwen_result.session_id or session_id
 
@@ -337,13 +335,7 @@ Test log excerpt:
         outputs: list[str] = []
         success = True
         for command in commands:
-            completed = subprocess.run(
-                command,
-                cwd=self.config.repo_root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            completed = self._run_subprocess(command)
             outputs.append(f"$ {' '.join(command)}\n{completed.stdout}\n{completed.stderr}")
             if completed.returncode != 0:
                 success = False
@@ -359,15 +351,24 @@ Test log excerpt:
             "--filter",
             self.config.test_filter_template.format(candidate=hint),
         ]
-        completed = subprocess.run(
-            command,
-            cwd=self.config.repo_root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        completed = self._run_subprocess(command)
         log_path.write_text(f"$ {' '.join(command)}\n{completed.stdout}\n{completed.stderr}", encoding="utf-8")
         return completed.returncode == 0
+
+    def _run_subprocess(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                command,
+                cwd=self.config.repo_root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            executable = command[0]
+            raise RuntimeError(
+                f"Could not start executable '{executable}'. Make sure it is installed and available in PATH."
+            ) from exc
 
     def _invoke_qwen(
         self,

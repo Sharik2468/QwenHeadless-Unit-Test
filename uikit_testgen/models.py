@@ -88,8 +88,8 @@ class RunConfig:
     max_repair_attempts: int = 3
     approval_mode: str = "yolo"
     max_session_turns: int = 30
-    max_wall_time: str = "15m"
-    max_tool_calls: int = 50
+    max_wall_time: str | None = None
+    max_tool_calls: int | None = None
     build_after_each_control: bool = True
     test_after_each_control: bool = True
     unit_test_filter: str = "FullyQualifiedName~{control}"

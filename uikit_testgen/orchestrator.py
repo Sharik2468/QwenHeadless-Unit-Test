@@ -183,8 +183,6 @@ class Orchestrator:
                 qwen_output_path,
                 resume_session_id=repair_session_id,
                 session_turns=15,
-                wall_time="10m",
-                tool_calls=30,
             )
             repair_session_id = qwen_result.session_id or repair_session_id
 
@@ -350,13 +348,7 @@ Test log excerpt:
         outputs: list[str] = []
         success = True
         for command in commands:
-            completed = subprocess.run(
-                command,
-                cwd=self.config.repo_root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            completed = self._run_subprocess(command)
             outputs.append(f"$ {' '.join(command)}\n{completed.stdout}\n{completed.stderr}")
             if completed.returncode != 0:
                 success = False
@@ -383,18 +375,27 @@ Test log excerpt:
         outputs: list[str] = []
         success = True
         for command in commands:
-            completed = subprocess.run(
+            completed = self._run_subprocess(command)
+            outputs.append(f"$ {' '.join(command)}\n{completed.stdout}\n{completed.stderr}")
+            if completed.returncode != 0:
+                success = False
+        log_path.write_text("\n\n".join(outputs), encoding="utf-8")
+        return success
+
+    def _run_subprocess(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
                 command,
                 cwd=self.config.repo_root,
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            outputs.append(f"$ {' '.join(command)}\n{completed.stdout}\n{completed.stderr}")
-            if completed.returncode != 0:
-                success = False
-        log_path.write_text("\n\n".join(outputs), encoding="utf-8")
-        return success
+        except FileNotFoundError as exc:
+            executable = command[0]
+            raise RuntimeError(
+                f"Could not start executable '{executable}'. Make sure it is installed and available in PATH."
+            ) from exc
 
     def _load_or_fallback_result(
         self,

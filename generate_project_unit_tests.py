@@ -36,8 +36,8 @@ def add_shared_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-candidates", type=int, default=10)
     parser.add_argument("--max-repair-attempts", type=int, default=3)
     parser.add_argument("--max-session-turns", type=int, default=30)
-    parser.add_argument("--max-wall-time", default="15m")
-    parser.add_argument("--max-tool-calls", type=int, default=50)
+    parser.add_argument("--max-wall-time")
+    parser.add_argument("--max-tool-calls", type=int)
     parser.add_argument("--test-filter-template", default="FullyQualifiedName~{candidate}")
 
 
