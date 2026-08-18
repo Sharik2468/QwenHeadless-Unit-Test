@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from testgen_shared.qwen import QwenRunResult, run_qwen
+from testgen_shared.test_quality import (
+    has_no_tests_matched,
+    low_value_test_reason,
+    resolve_reported_test_paths,
+)
 
 from .discovery import build_fingerprint, discover_controls, manifest_to_json
 from .models import ControlManifest, ControlProgress, ControlResult, RunConfig, utc_now_iso
@@ -159,6 +164,22 @@ class Orchestrator:
                 build_ok=build_ok,
                 test_ok=test_ok,
             )
+            quality_issue = self._evaluate_generated_test_quality(result)
+            if quality_issue:
+                result.status = "manual_review"
+                result.unresolved_issues.append(
+                    {
+                        "type": "quality_guardrail",
+                        "reason": quality_issue,
+                        "severity": "high",
+                    }
+                )
+                result.notes.append(
+                    "Result rejected by runtime quality guardrail instead of being marked verified."
+                )
+                self._write_result(report_path, result)
+                self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
+                return
             result.status = "verified"
             self._write_result(report_path, result)
             self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
@@ -198,6 +219,22 @@ class Orchestrator:
                     build_ok=build_ok,
                     test_ok=test_ok,
                 )
+                    quality_issue = self._evaluate_generated_test_quality(result)
+                    if quality_issue:
+                        result.status = "manual_review"
+                        result.unresolved_issues.append(
+                            {
+                                "type": "quality_guardrail",
+                                "reason": quality_issue,
+                                "severity": "high",
+                            }
+                        )
+                        result.notes.append(
+                            "Result rejected by runtime quality guardrail instead of being marked verified."
+                        )
+                        self._write_result(report_path, result)
+                        self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", repair_session_id)
+                        return
                 result.status = "verified"
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "verified", "completed", repair_session_id)
@@ -261,6 +298,8 @@ Hard constraints:
    - custom control logic for repository-owned controls only
 7. After writing tests, build and run relevant tests. If they fail, fix the tests if possible.
 8. Write a JSON report file to the requested report path.
+9. Invalid tests must NOT be generated. Specifically, do not generate tests that only compare token names, ResourceKey strings, or other static constants without exercising a real control instance or runtime resource application.
+10. If meaningful runtime verification is not possible for a token or style binding, do not replace it with a weak string-based test. Record the gap in unresolved_issues and stop.
 
 Target control:
 {manifest_json}
@@ -277,6 +316,7 @@ Tasks:
 2. Decide which tests are appropriate:
    - headless runtime style/state tests
    - unit tests for custom logic
+   - skip fake/low-value tests entirely
 3. Create or update tests in the specified test projects.
 4. Build the affected test projects.
 5. Run relevant tests for this control.
@@ -294,6 +334,9 @@ The final report JSON must include:
 - build
 - test_run
 - notes
+
+A generated test is only acceptable if it checks runtime-applied behavior or values on the actual control, its template, or its rendered state.
+Tests that only validate ResourceKey values or typed token constant names are invalid.
 
 Return a short final summary in plain text after writing the report.
 """
@@ -377,10 +420,33 @@ Test log excerpt:
         for command in commands:
             completed = self._run_subprocess(command)
             outputs.append(f"$ {' '.join(command)}\n{completed.stdout}\n{completed.stderr}")
-            if completed.returncode != 0:
+            if completed.returncode != 0 or has_no_tests_matched(f"{completed.stdout}\n{completed.stderr}"):
                 success = False
         log_path.write_text("\n\n".join(outputs), encoding="utf-8")
         return success
+
+    def _evaluate_generated_test_quality(self, result: ControlResult) -> str | None:
+        reported_paths = [*result.created_tests, *result.updated_tests]
+        if not reported_paths:
+            return "No created or updated test files were reported, so the run cannot be considered verified."
+
+        resolved_paths = resolve_reported_test_paths(
+            reported_paths=reported_paths,
+            repo_root=self.config.repo_root,
+            search_roots=[
+                self.config.unit_tests_project.parent,
+                self.config.headless_tests_project.parent,
+            ],
+        )
+        if not resolved_paths:
+            return "Generated test file paths could not be resolved on disk for quality inspection."
+
+        for path in resolved_paths:
+            file_text = path.read_text(encoding="utf-8", errors="ignore")
+            reason = low_value_test_reason(file_text)
+            if reason:
+                return f"{path}: {reason}"
+        return None
 
     def _run_subprocess(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         try:
