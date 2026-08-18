@@ -357,6 +357,55 @@ class ControlResultParsingTests(unittest.TestCase):
                 )
             )
 
+    def test_apply_baseline_context_distinguishes_pre_existing_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            unit_project = root / "tests/Unit/Unit.csproj"
+            headless_project = root / "tests/Headless/Headless.csproj"
+            styles_root = root / "styles"
+            unit_project.parent.mkdir(parents=True)
+            headless_project.parent.mkdir(parents=True)
+            styles_root.mkdir(parents=True)
+            unit_project.write_text("<Project />", encoding="utf-8")
+            headless_project.write_text("<Project />", encoding="utf-8")
+
+            orchestrator = Orchestrator(
+                RunConfig(
+                    repo_root=root,
+                    unit_tests_project=unit_project,
+                    headless_tests_project=headless_project,
+                    styles_root=styles_root,
+                    custom_controls_root=None,
+                    artifacts_dir=root / "artifacts",
+                )
+            )
+            build_log = root / "build.log"
+            test_log = root / "test.log"
+            build_log.write_text("error in SharedTests.cs", encoding="utf-8")
+            test_log.write_text("baseline test failure", encoding="utf-8")
+
+            result = ControlResult(
+                control=SAMPLE_CONTROL,
+                status="partial",
+                created_tests=[SAMPLE_TEST_FILE],
+            )
+            result.build = {"attempted": True, "passed": False, "log_file": str(build_log)}
+            result.test_run = {"attempted": True, "passed": False, "log_file": str(test_log), "failed_tests": []}
+
+            orchestrator._apply_baseline_context(
+                result,
+                baseline={
+                    "attempted": True,
+                    "build": {"attempted": True, "passed": False, "log_file": str(root / "baseline-build.log")},
+                    "test_run": {"attempted": True, "passed": False, "log_file": str(root / "baseline-test.log")},
+                },
+                build_log_path=build_log,
+                test_log_path=test_log,
+            )
+
+            self.assertEqual(result.build["failure_origin"], "pre_existing_build_failure")
+            self.assertEqual(result.test_run["failure_origin"], "pre_existing_test_failure")
+
 
 if __name__ == "__main__":
     unittest.main()

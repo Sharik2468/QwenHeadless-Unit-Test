@@ -122,6 +122,8 @@ class Orchestrator:
         qwen_output_path = control_dir / "qwen-output.json"
         build_log_path = control_dir / "build.log"
         test_log_path = control_dir / "test.log"
+        baseline_build_log_path = control_dir / "baseline-build.log"
+        baseline_test_log_path = control_dir / "baseline-test.log"
         manifest_path = control_dir / "control_manifest.json"
         manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -160,6 +162,12 @@ class Orchestrator:
             research_summary_path=research_summary_path,
             research_prompt_path=research_prompt_path,
             research_output_path=research_output_path,
+        )
+        baseline = self._run_baseline_verification(
+            manifest,
+            research_summary,
+            baseline_build_log_path,
+            baseline_test_log_path,
         )
         prompt = self._build_generation_prompt(manifest, report_path, research_summary)
         prompt_path.write_text(prompt, encoding="utf-8")
@@ -206,6 +214,7 @@ class Orchestrator:
                 test_log_path=test_log_path,
                 build_attempted=False,
                 test_attempted=False,
+                baseline=baseline,
             )
             self._write_result(report_path, result)
             self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
@@ -220,6 +229,7 @@ class Orchestrator:
                 test_log_path=test_log_path,
                 build_attempted=False,
                 test_attempted=False,
+                baseline=baseline,
             )
             self._write_result(report_path, initial_result)
             self._set_control_status(progress, manifest.name, "manual_review", "blocked_runtime_gap", control_progress.session_id)
@@ -259,6 +269,7 @@ class Orchestrator:
                 test_log_path=test_log_path,
                 build_attempted=build_attempted,
                 test_attempted=test_attempted,
+                baseline=baseline,
             )
             quality_issue = self._evaluate_generated_test_quality(result, manifest)
             if quality_issue:
@@ -348,6 +359,7 @@ class Orchestrator:
                     test_log_path=test_log_path,
                     build_attempted=False,
                     test_attempted=False,
+                    baseline=baseline,
                 )
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
@@ -362,6 +374,7 @@ class Orchestrator:
                     test_log_path=test_log_path,
                     build_attempted=False,
                     test_attempted=False,
+                    baseline=baseline,
                 )
                 self._write_result(report_path, attempt_result)
                 self._set_control_status(progress, manifest.name, "manual_review", "blocked_runtime_gap", control_progress.session_id)
@@ -392,6 +405,7 @@ class Orchestrator:
                     test_log_path=test_log_path,
                     build_attempted=build_attempted,
                     test_attempted=test_attempted,
+                    baseline=baseline,
                 )
                 quality_issue = self._evaluate_generated_test_quality(result, manifest)
                 if quality_issue:
@@ -437,6 +451,7 @@ class Orchestrator:
             test_log_path=test_log_path,
             build_attempted=build_attempted,
             test_attempted=test_attempted,
+            baseline=baseline,
         )
         result.status = "manual_review"
         result.notes.append("Automatic repair attempts exhausted.")
@@ -653,6 +668,44 @@ Test log excerpt:
             notes=["Rechecked existing tests without regeneration."],
         )
 
+    def _run_baseline_verification(
+        self,
+        manifest: ControlManifest,
+        research_summary: dict[str, Any],
+        build_log_path: Path,
+        test_log_path: Path,
+    ) -> dict[str, Any]:
+        if not self._research_has_existing_tests(research_summary):
+            return {
+                "attempted": False,
+                "build": {"attempted": False, "passed": False, "log_file": str(build_log_path)},
+                "test_run": {"attempted": False, "passed": False, "log_file": str(test_log_path)},
+            }
+
+        build_ok = True
+        test_ok = True
+        build_attempted = False
+        test_attempted = False
+        if self.config.build_after_each_control:
+            build_attempted = True
+            build_ok = self._run_builds(build_log_path)
+        if build_ok and self.config.test_after_each_control:
+            test_attempted = True
+            test_ok = self._run_tests(manifest, test_log_path)
+        return {
+            "attempted": build_attempted or test_attempted,
+            "build": {
+                "attempted": build_attempted,
+                "passed": build_ok,
+                "log_file": str(build_log_path),
+            },
+            "test_run": {
+                "attempted": test_attempted,
+                "passed": test_ok,
+                "log_file": str(test_log_path),
+            },
+        }
+
     def _run_builds(self, log_path: Path) -> bool:
         commands = [
             ["dotnet", "build", str(self.config.unit_tests_project)],
@@ -772,6 +825,60 @@ Test log excerpt:
             and test_ok
         )
 
+    def _apply_baseline_context(
+        self,
+        result: ControlResult,
+        baseline: dict[str, Any] | None,
+        build_log_path: Path,
+        test_log_path: Path,
+    ) -> None:
+        if not baseline or not baseline.get("attempted"):
+            return
+
+        build_baseline = baseline.get("build", {})
+        test_baseline = baseline.get("test_run", {})
+        result.build["baseline_attempted"] = build_baseline.get("attempted", False)
+        result.build["baseline_passed"] = build_baseline.get("passed", False)
+        result.build["baseline_log_file"] = build_baseline.get("log_file")
+        result.test_run["baseline_attempted"] = test_baseline.get("attempted", False)
+        result.test_run["baseline_passed"] = test_baseline.get("passed", False)
+        result.test_run["baseline_log_file"] = test_baseline.get("log_file")
+
+        if result.build.get("attempted") and not result.build.get("passed"):
+            result.build["failure_origin"] = self._classify_build_failure_origin(
+                result,
+                build_baseline,
+                build_log_path,
+            )
+        if result.test_run.get("attempted") and not result.test_run.get("passed"):
+            result.test_run["failure_origin"] = self._classify_test_failure_origin(
+                test_baseline,
+            )
+
+    def _classify_build_failure_origin(
+        self,
+        result: ControlResult,
+        baseline_build: dict[str, Any],
+        build_log_path: Path,
+    ) -> str:
+        if not baseline_build.get("attempted"):
+            return "generated_build_failure"
+        if baseline_build.get("passed"):
+            return "generated_build_failure"
+
+        build_log = build_log_path.read_text(encoding="utf-8", errors="ignore") if build_log_path.exists() else ""
+        reported_files = [Path(path).name for path in [*result.created_tests, *result.updated_tests]]
+        if any(file_name and file_name in build_log for file_name in reported_files):
+            return "generated_build_failure"
+        return "pre_existing_build_failure"
+
+    def _classify_test_failure_origin(self, baseline_test: dict[str, Any]) -> str:
+        if not baseline_test.get("attempted"):
+            return "generated_test_failure"
+        if baseline_test.get("passed"):
+            return "generated_test_failure"
+        return "pre_existing_test_failure"
+
     def _research_has_existing_tests(self, research_summary: dict[str, Any]) -> bool:
         existing_test_files = self._normalized_existing_test_coverage(research_summary)["files"]
         if not isinstance(existing_test_files, list):
@@ -846,6 +953,7 @@ Test log excerpt:
         test_log_path: Path,
         build_attempted: bool,
         test_attempted: bool,
+        baseline: dict[str, Any] | None = None,
     ) -> None:
         result.build = {
             "attempted": build_attempted,
@@ -858,6 +966,12 @@ Test log excerpt:
             "log_file": str(test_log_path),
             "failed_tests": [],
         }
+        self._apply_baseline_context(
+            result,
+            baseline=baseline,
+            build_log_path=build_log_path,
+            test_log_path=test_log_path,
+        )
 
     def _ensure_research_summary(
         self,
