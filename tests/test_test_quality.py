@@ -29,7 +29,7 @@ public void AdornerLayer_TypedTokens_S350BorderRadius_Correct_Key()
 """
         reason = low_value_test_reason(file_text)
         self.assertIsNotNone(reason)
-        self.assertIn("ResourceKey", reason)
+        self.assertIn("token keys", reason)
 
     def test_low_value_test_reason_allows_runtime_headless_checks(self) -> None:
         file_text = """

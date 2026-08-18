@@ -219,22 +219,22 @@ class Orchestrator:
                     build_ok=build_ok,
                     test_ok=test_ok,
                 )
-                    quality_issue = self._evaluate_generated_test_quality(result)
-                    if quality_issue:
-                        result.status = "manual_review"
-                        result.unresolved_issues.append(
-                            {
-                                "type": "quality_guardrail",
-                                "reason": quality_issue,
-                                "severity": "high",
-                            }
-                        )
-                        result.notes.append(
-                            "Result rejected by runtime quality guardrail instead of being marked verified."
-                        )
-                        self._write_result(report_path, result)
-                        self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", repair_session_id)
-                        return
+                quality_issue = self._evaluate_generated_test_quality(result)
+                if quality_issue:
+                    result.status = "manual_review"
+                    result.unresolved_issues.append(
+                        {
+                            "type": "quality_guardrail",
+                            "reason": quality_issue,
+                            "severity": "high",
+                        }
+                    )
+                    result.notes.append(
+                        "Result rejected by runtime quality guardrail instead of being marked verified."
+                    )
+                    self._write_result(report_path, result)
+                    self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", repair_session_id)
+                    return
                 result.status = "verified"
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "verified", "completed", repair_session_id)
