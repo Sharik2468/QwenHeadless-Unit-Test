@@ -146,13 +146,50 @@ class Orchestrator:
         control_progress.session_id = qwen_result.session_id or control_progress.session_id
         progress["controls"][manifest.name] = control_progress.to_dict()
         self._save_progress(progress)
+        early_quality_issue = self._evaluate_generated_test_quality(
+            self._load_or_fallback_result(
+                report_path,
+                manifest.name,
+                build_log_path,
+                test_log_path,
+                qwen_result,
+                build_ok=False,
+                test_ok=False,
+            ),
+            manifest,
+        )
+        if early_quality_issue:
+            result = self._load_or_fallback_result(
+                report_path,
+                manifest.name,
+                build_log_path,
+                test_log_path,
+                qwen_result,
+                build_ok=False,
+                test_ok=False,
+            )
+            result.status = "manual_review"
+            result.unresolved_issues.append(
+                {
+                    "type": "quality_guardrail",
+                    "reason": early_quality_issue,
+                    "severity": "high",
+                }
+            )
+            result.notes.append(
+                "Generation stopped before build because the produced tests already degraded into low-value checks."
+            )
+            self._apply_execution_outcome(result, build_ok=False, test_ok=False, build_log_path=build_log_path, test_log_path=test_log_path)
+            self._write_result(report_path, result)
+            self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
+            return
 
         build_ok = True
         test_ok = True
         if self.config.build_after_each_control:
             build_ok = self._run_builds(build_log_path)
         if build_ok and self.config.test_after_each_control:
-            test_ok = self._run_tests(manifest.name, test_log_path)
+            test_ok = self._run_tests(manifest, test_log_path)
 
         if build_ok and test_ok:
             result = self._load_or_fallback_result(
@@ -164,7 +201,14 @@ class Orchestrator:
                 build_ok=build_ok,
                 test_ok=test_ok,
             )
-            quality_issue = self._evaluate_generated_test_quality(result)
+            self._apply_execution_outcome(
+                result,
+                build_ok=build_ok,
+                test_ok=test_ok,
+                build_log_path=build_log_path,
+                test_log_path=test_log_path,
+            )
+            quality_issue = self._evaluate_generated_test_quality(result, manifest)
             if quality_issue:
                 result.status = "manual_review"
                 result.unresolved_issues.append(
@@ -206,9 +250,46 @@ class Orchestrator:
                 session_turns=15,
             )
             repair_session_id = qwen_result.session_id or repair_session_id
+            early_quality_issue = self._evaluate_generated_test_quality(
+                self._load_or_fallback_result(
+                    report_path,
+                    manifest.name,
+                    build_log_path,
+                    test_log_path,
+                    qwen_result,
+                    build_ok=False,
+                    test_ok=False,
+                ),
+                manifest,
+            )
+            if early_quality_issue:
+                result = self._load_or_fallback_result(
+                    report_path,
+                    manifest.name,
+                    build_log_path,
+                    test_log_path,
+                    qwen_result,
+                    build_ok=False,
+                    test_ok=False,
+                )
+                result.status = "manual_review"
+                result.unresolved_issues.append(
+                    {
+                        "type": "quality_guardrail",
+                        "reason": early_quality_issue,
+                        "severity": "high",
+                    }
+                )
+                result.notes.append(
+                    "Repair loop stopped because the generated tests degraded into low-value checks."
+                )
+                self._apply_execution_outcome(result, build_ok=False, test_ok=False, build_log_path=build_log_path, test_log_path=test_log_path)
+                self._write_result(report_path, result)
+                self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", repair_session_id)
+                return
 
             build_ok = self._run_builds(build_log_path)
-            test_ok = build_ok and self._run_tests(manifest.name, test_log_path)
+            test_ok = build_ok and self._run_tests(manifest, test_log_path)
             if build_ok and test_ok:
                 result = self._load_or_fallback_result(
                     report_path,
@@ -219,7 +300,14 @@ class Orchestrator:
                     build_ok=build_ok,
                     test_ok=test_ok,
                 )
-                quality_issue = self._evaluate_generated_test_quality(result)
+                self._apply_execution_outcome(
+                    result,
+                    build_ok=build_ok,
+                    test_ok=test_ok,
+                    build_log_path=build_log_path,
+                    test_log_path=test_log_path,
+                )
+                quality_issue = self._evaluate_generated_test_quality(result, manifest)
                 if quality_issue:
                     result.status = "manual_review"
                     result.unresolved_issues.append(
@@ -248,6 +336,13 @@ class Orchestrator:
             qwen_result,
             build_ok=build_ok,
             test_ok=test_ok,
+        )
+        self._apply_execution_outcome(
+            result,
+            build_ok=build_ok,
+            test_ok=test_ok,
+            build_log_path=build_log_path,
+            test_log_path=test_log_path,
         )
         result.status = "manual_review"
         result.notes.append("Automatic repair attempts exhausted.")
@@ -280,6 +375,11 @@ class Orchestrator:
     def _build_generation_prompt(self, manifest: ControlManifest, report_path: Path) -> str:
         relevant_files = "\n".join(f"- {path}" for path in manifest.related_files)
         manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
+        unit_test_policy = (
+            "This control has repository-owned custom code files, so classic unit tests for its custom logic are allowed."
+            if self._should_run_unit_tests(manifest)
+            else "This control has no repository-owned custom code files. Do NOT generate classic unit tests in the unit test project for it; focus on meaningful headless/runtime verification only."
+        )
         return f"""You are generating or updating automated tests for one Avalonia UIKit control.
 
 Goal:
@@ -311,11 +411,14 @@ Projects:
 - Unit tests project: {self.config.unit_tests_project}
 - Headless tests project: {self.config.headless_tests_project}
 
+Unit test policy:
+{unit_test_policy}
+
 Tasks:
 1. Analyze the target control.
 2. Decide which tests are appropriate:
    - headless runtime style/state tests
-   - unit tests for custom logic
+   - unit tests for custom logic only when the control has repository-owned custom code files
    - skip fake/low-value tests entirely
 3. Create or update tests in the specified test projects.
 4. Build the affected test projects.
@@ -346,6 +449,8 @@ Return a short final summary in plain text after writing the report.
 
 Only modify tests related to {control_name}. Prefer stable assertions. If some checks are too brittle,
 keep the reliable tests and record unresolved cases in the report file for this control.
+Do NOT degrade into tests that only check ResourceKey values, token names, or TryFindResource-only resource existence.
+If meaningful runtime verification cannot be restored, stop and keep the control in manual_review instead of weakening the assertions.
 
 Build log excerpt:
 {build_log[-12000:]}
@@ -365,7 +470,7 @@ Test log excerpt:
         if self.config.build_after_each_control:
             build_ok = self._run_builds(build_log_path)
         if build_ok and self.config.test_after_each_control:
-            test_ok = self._run_tests(manifest.name, test_log_path)
+            test_ok = self._run_tests(manifest, test_log_path)
         return ControlResult(
             control=manifest.name,
             status="verified" if build_ok and test_ok else "partial",
@@ -398,23 +503,27 @@ Test log excerpt:
         log_path.write_text("\n\n".join(outputs), encoding="utf-8")
         return success
 
-    def _run_tests(self, control_name: str, log_path: Path) -> bool:
-        commands = [
-            [
-                "dotnet",
-                "test",
-                str(self.config.unit_tests_project),
-                "--filter",
-                self.config.unit_test_filter.format(control=control_name),
-            ],
+    def _run_tests(self, manifest: ControlManifest, log_path: Path) -> bool:
+        commands: list[list[str]] = []
+        if self._should_run_unit_tests(manifest):
+            commands.append(
+                [
+                    "dotnet",
+                    "test",
+                    str(self.config.unit_tests_project),
+                    "--filter",
+                    self.config.unit_test_filter.format(control=manifest.name),
+                ]
+            )
+        commands.append(
             [
                 "dotnet",
                 "test",
                 str(self.config.headless_tests_project),
                 "--filter",
-                self.config.headless_test_filter.format(control=control_name),
-            ],
-        ]
+                self.config.headless_test_filter.format(control=manifest.name),
+            ]
+        )
         outputs: list[str] = []
         success = True
         for command in commands:
@@ -425,7 +534,7 @@ Test log excerpt:
         log_path.write_text("\n\n".join(outputs), encoding="utf-8")
         return success
 
-    def _evaluate_generated_test_quality(self, result: ControlResult) -> str | None:
+    def _evaluate_generated_test_quality(self, result: ControlResult, manifest: ControlManifest) -> str | None:
         reported_paths = [*result.created_tests, *result.updated_tests]
         if not reported_paths:
             return "No created or updated test files were reported, so the run cannot be considered verified."
@@ -442,11 +551,39 @@ Test log excerpt:
             return "Generated test file paths could not be resolved on disk for quality inspection."
 
         for path in resolved_paths:
+            if not self._should_run_unit_tests(manifest) and self.config.unit_tests_project.parent in path.parents:
+                return (
+                    f"{path}: styled_control without custom_code_files should not generate classic unit tests in "
+                    f"{self.config.unit_tests_project.parent}."
+                )
             file_text = path.read_text(encoding="utf-8", errors="ignore")
             reason = low_value_test_reason(file_text)
             if reason:
                 return f"{path}: {reason}"
         return None
+
+    def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
+        return bool(manifest.custom_code_files)
+
+    def _apply_execution_outcome(
+        self,
+        result: ControlResult,
+        build_ok: bool,
+        test_ok: bool,
+        build_log_path: Path,
+        test_log_path: Path,
+    ) -> None:
+        result.build = {
+            "attempted": self.config.build_after_each_control,
+            "passed": build_ok,
+            "log_file": str(build_log_path),
+        }
+        result.test_run = {
+            "attempted": self.config.test_after_each_control,
+            "passed": test_ok,
+            "log_file": str(test_log_path),
+            "failed_tests": [],
+        }
 
     def _run_subprocess(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         try:

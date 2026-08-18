@@ -44,6 +44,18 @@ await Dispatcher.UIThread.InvokeAsync(async () =>
 """
         self.assertIsNone(low_value_test_reason(file_text))
 
+    def test_low_value_test_reason_flags_try_find_resource_only_checks(self) -> None:
+        file_text = """
+[AvaloniaFact]
+public void FocusResources_OuterBorderColor_Exists()
+{
+    Assert.True(Application.Current.TryFindResource("focus.border.color.outer", out _));
+}
+"""
+        reason = low_value_test_reason(file_text)
+        self.assertIsNotNone(reason)
+        self.assertIn("TryFindResource", reason)
+
     def test_resolve_reported_test_paths_can_find_by_basename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
