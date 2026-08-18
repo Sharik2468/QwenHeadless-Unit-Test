@@ -7,7 +7,7 @@ from pathlib import Path
 
 from testgen_shared.qwen import QwenRunResult
 from uikit_testgen.models import ControlResult, RunConfig
-from uikit_testgen.orchestrator import UIKitTestOrchestrator
+from uikit_testgen.orchestrator import Orchestrator
 
 
 class ControlResultParsingTests(unittest.TestCase):
@@ -57,7 +57,7 @@ class ControlResultParsingTests(unittest.TestCase):
             unit_project.write_text("<Project />", encoding="utf-8")
             headless_project.write_text("<Project />", encoding="utf-8")
 
-            orchestrator = UIKitTestOrchestrator(
+            orchestrator = Orchestrator(
                 RunConfig(
                     repo_root=repo_root,
                     unit_tests_project=unit_project,
@@ -87,7 +87,14 @@ class ControlResultParsingTests(unittest.TestCase):
                 control_name="AdornerLayer",
                 build_log_path=artifacts_dir / "build.log",
                 test_log_path=artifacts_dir / "test.log",
-                qwen_result=QwenRunResult(session_id=None, assistant_messages=[], raw_output="[]", events=[]),
+                qwen_result=QwenRunResult(
+                    returncode=0,
+                    stdout="[]",
+                    stderr="",
+                    session_id=None,
+                    assistant_messages=[],
+                    raw_events=[],
+                ),
                 build_ok=True,
                 test_ok=True,
             )
