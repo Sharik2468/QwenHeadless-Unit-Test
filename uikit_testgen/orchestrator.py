@@ -221,7 +221,7 @@ class Orchestrator:
                 test_attempted = True
                 test_ok = self._run_tests(manifest, test_log_path)
 
-        if build_ok and test_ok:
+        if should_attempt_initial_verification and build_ok and test_ok:
             result = self._load_or_fallback_result(
                 report_path,
                 manifest.name,

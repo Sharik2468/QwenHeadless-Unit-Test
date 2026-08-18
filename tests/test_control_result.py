@@ -167,7 +167,11 @@ class ControlResultParsingTests(unittest.TestCase):
             )
 
             with (
-                patch.object(orchestrator, "_ensure_research_summary", return_value={"summary": "ok"}),
+                patch.object(
+                    orchestrator,
+                    "_ensure_research_summary",
+                    return_value={"summary": "ok", "existing_test_files": ["AdornerLayerTests.cs"]},
+                ),
                 patch.object(orchestrator, "_build_generation_prompt", return_value="prompt"),
                 patch.object(orchestrator, "_invoke_generation", return_value=qwen_result),
                 patch.object(orchestrator, "_run_builds", return_value=True) as mocked_builds,
