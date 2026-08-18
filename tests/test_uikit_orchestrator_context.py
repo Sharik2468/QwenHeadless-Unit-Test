@@ -50,6 +50,7 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             self.assertIn("Do NOT plan classic unit tests", prompt)
             self.assertIn("Writing the research summary artifact requested below is required and explicitly allowed.", prompt)
             self.assertIn("Inspect existing control-specific tests, if any", prompt)
+            self.assertIn('"status": "none|partial|adequate|stale|unknown"', prompt)
 
     def test_generation_prompt_requires_existing_test_review_before_preserving(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -86,6 +87,7 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             )
 
             self.assertIn("You MUST inspect any existing tests for this control", prompt)
+            self.assertIn("generation_outcome", prompt)
             self.assertIn("existing_tests_preserved", prompt)
             self.assertIn("compare them against the current control/theme/resource files", prompt)
 

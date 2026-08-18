@@ -47,6 +47,7 @@ class ControlResult:
     status: str
     created_tests: list[str] = field(default_factory=list)
     updated_tests: list[str] = field(default_factory=list)
+    generation_outcome: str | None = None
     existing_tests_preserved: bool | None = None
     checks_added: dict[str, Any] = field(default_factory=dict)
     unresolved_issues: list[dict[str, Any]] = field(default_factory=list)

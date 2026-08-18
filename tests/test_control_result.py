@@ -20,6 +20,7 @@ class ControlResultParsingTests(unittest.TestCase):
             {
                 "control": SAMPLE_CONTROL,
                 "status": "verified",
+                "generation_outcome": "preserved_existing_tests",
                 "existing_tests_preserved": True,
                 "notes": ["existing coverage reused"],
             }
@@ -27,6 +28,7 @@ class ControlResultParsingTests(unittest.TestCase):
 
         self.assertEqual(result.control, SAMPLE_CONTROL)
         self.assertEqual(result.status, "verified")
+        self.assertEqual(result.generation_outcome, "preserved_existing_tests")
         self.assertTrue(result.existing_tests_preserved)
         self.assertEqual(result.notes, ["existing coverage reused"])
 
@@ -305,6 +307,54 @@ class ControlResultParsingTests(unittest.TestCase):
             self.assertEqual(result_payload["created_tests"], [SAMPLE_TEST_FILE])
             self.assertTrue(result_payload["build"]["attempted"])
             self.assertTrue(result_payload["test_run"]["attempted"])
+
+    def test_preserve_existing_tests_requires_adequate_research_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            unit_project = root / "tests/Unit/Unit.csproj"
+            headless_project = root / "tests/Headless/Headless.csproj"
+            styles_root = root / "styles"
+            unit_project.parent.mkdir(parents=True)
+            headless_project.parent.mkdir(parents=True)
+            styles_root.mkdir(parents=True)
+            unit_project.write_text("<Project />", encoding="utf-8")
+            headless_project.write_text("<Project />", encoding="utf-8")
+
+            orchestrator = Orchestrator(
+                RunConfig(
+                    repo_root=root,
+                    unit_tests_project=unit_project,
+                    headless_tests_project=headless_project,
+                    styles_root=styles_root,
+                    custom_controls_root=None,
+                    artifacts_dir=root / "artifacts",
+                )
+            )
+            result = ControlResult(
+                control=SAMPLE_CONTROL,
+                status="partial",
+                generation_outcome="preserved_existing_tests",
+                existing_tests_preserved=True,
+            )
+
+            self.assertTrue(
+                orchestrator._should_attempt_verification(
+                    result,
+                    {
+                        "existing_test_files": [SAMPLE_TEST_FILE],
+                        "existing_test_coverage": {"status": "adequate", "files": [SAMPLE_TEST_FILE]},
+                    },
+                )
+            )
+            self.assertFalse(
+                orchestrator._should_attempt_verification(
+                    result,
+                    {
+                        "existing_test_files": [SAMPLE_TEST_FILE],
+                        "existing_test_coverage": {"status": "partial", "files": [SAMPLE_TEST_FILE]},
+                    },
+                )
+            )
 
 
 if __name__ == "__main__":
