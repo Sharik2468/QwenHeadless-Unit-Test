@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,6 +47,7 @@ class ControlResult:
     status: str
     created_tests: list[str] = field(default_factory=list)
     updated_tests: list[str] = field(default_factory=list)
+    existing_tests_preserved: bool | None = None
     checks_added: dict[str, Any] = field(default_factory=dict)
     unresolved_issues: list[dict[str, Any]] = field(default_factory=list)
     build: dict[str, Any] = field(default_factory=dict)
@@ -54,7 +55,22 @@ class ControlResult:
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        return {key: value for key, value in payload.items() if value is not None}
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ControlResult":
+        supported_fields = {item.name for item in fields(cls)}
+        normalized = {key: value for key, value in payload.items() if key in supported_fields}
+        normalized.setdefault("control", str(payload.get("control", "")))
+        normalized.setdefault("status", str(payload.get("status", "partial")))
+        result = cls(**normalized)
+        ignored_fields = sorted(set(payload) - supported_fields)
+        if ignored_fields:
+            result.notes.append(
+                "Ignored unsupported report fields: " + ", ".join(ignored_fields)
+            )
+        return result
 
 
 @dataclass(slots=True)

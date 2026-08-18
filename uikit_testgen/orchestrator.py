@@ -809,7 +809,7 @@ Return a short plain-text summary after writing the JSON file.
     ) -> ControlResult:
         if report_path.exists():
             payload = json.loads(report_path.read_text(encoding="utf-8"))
-            return ControlResult(**payload)
+            return ControlResult.from_dict(payload)
 
         return ControlResult(
             control=control_name,
