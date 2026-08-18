@@ -49,6 +49,7 @@ def add_shared_arguments(parser: argparse.ArgumentParser, include_optional_roots
     parser.add_argument("--max-tool-calls", type=int)
     parser.add_argument("--unit-test-filter", default="FullyQualifiedName~{control}")
     parser.add_argument("--headless-test-filter", default="FullyQualifiedName~{control}")
+    parser.add_argument("--reference-path", action="append", type=Path, default=[])
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     if include_optional_roots:
@@ -103,6 +104,7 @@ def build_config(args: argparse.Namespace) -> RunConfig:
         test_after_each_control=not args.skip_tests,
         unit_test_filter=args.unit_test_filter,
         headless_test_filter=args.headless_test_filter,
+        reference_paths=list(args.reference_path),
     )
 
 
