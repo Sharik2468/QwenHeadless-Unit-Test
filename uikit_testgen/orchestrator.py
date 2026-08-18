@@ -15,6 +15,10 @@ from testgen_shared.test_quality import (
 from .discovery import build_fingerprint, discover_controls, manifest_to_json
 from .models import ControlManifest, ControlProgress, ControlResult, RunConfig, utc_now_iso
 
+MISSING_REPORTED_TEST_FILES_REASON = (
+    "No created or updated test files were reported, so the run cannot be considered verified."
+)
+
 
 class Orchestrator:
     def __init__(self, config: RunConfig) -> None:
@@ -167,7 +171,7 @@ class Orchestrator:
             ),
             manifest,
         )
-        if early_quality_issue:
+        if early_quality_issue and early_quality_issue != MISSING_REPORTED_TEST_FILES_REASON:
             result = self._load_or_fallback_result(
                 report_path,
                 manifest.name,
@@ -233,20 +237,30 @@ class Orchestrator:
             )
             quality_issue = self._evaluate_generated_test_quality(result, manifest)
             if quality_issue:
-                result.status = "manual_review"
-                result.unresolved_issues.append(
-                    {
-                        "type": "quality_guardrail",
-                        "reason": quality_issue,
-                        "severity": "high",
-                    }
-                )
-                result.notes.append(
-                    "Result rejected by runtime quality guardrail instead of being marked verified."
-                )
-                self._write_result(report_path, result)
-                self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
-                return
+                if self._should_accept_existing_tests_without_changes(
+                    result,
+                    test_attempted=test_attempted,
+                    test_ok=test_ok,
+                ):
+                    result.existing_tests_preserved = True
+                    result.notes.append(
+                        "No test files were changed; existing tests matching the control filter were executed and passed."
+                    )
+                else:
+                    result.status = "manual_review"
+                    result.unresolved_issues.append(
+                        {
+                            "type": "quality_guardrail",
+                            "reason": quality_issue,
+                            "severity": "high",
+                        }
+                    )
+                    result.notes.append(
+                        "Result rejected by runtime quality guardrail instead of being marked verified."
+                    )
+                    self._write_result(report_path, result)
+                    self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
+                    return
             result.status = "verified"
             self._write_result(report_path, result)
             self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
@@ -286,7 +300,7 @@ class Orchestrator:
                 ),
                 manifest,
             )
-            if early_quality_issue:
+            if early_quality_issue and early_quality_issue != MISSING_REPORTED_TEST_FILES_REASON:
                 result = self._load_or_fallback_result(
                     report_path,
                     manifest.name,
@@ -345,20 +359,30 @@ class Orchestrator:
                 )
                 quality_issue = self._evaluate_generated_test_quality(result, manifest)
                 if quality_issue:
-                    result.status = "manual_review"
-                    result.unresolved_issues.append(
-                        {
-                            "type": "quality_guardrail",
-                            "reason": quality_issue,
-                            "severity": "high",
-                        }
-                    )
-                    result.notes.append(
-                        "Result rejected by runtime quality guardrail instead of being marked verified."
-                    )
-                    self._write_result(report_path, result)
-                    self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
-                    return
+                    if self._should_accept_existing_tests_without_changes(
+                        result,
+                        test_attempted=test_attempted,
+                        test_ok=test_ok,
+                    ):
+                        result.existing_tests_preserved = True
+                        result.notes.append(
+                            "No test files were changed; existing tests matching the control filter were executed and passed."
+                        )
+                    else:
+                        result.status = "manual_review"
+                        result.unresolved_issues.append(
+                            {
+                                "type": "quality_guardrail",
+                                "reason": quality_issue,
+                                "severity": "high",
+                            }
+                        )
+                        result.notes.append(
+                            "Result rejected by runtime quality guardrail instead of being marked verified."
+                        )
+                        self._write_result(report_path, result)
+                        self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
+                        return
                 result.status = "verified"
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
@@ -617,7 +641,7 @@ Test log excerpt:
     def _evaluate_generated_test_quality(self, result: ControlResult, manifest: ControlManifest) -> str | None:
         reported_paths = [*result.created_tests, *result.updated_tests]
         if not reported_paths:
-            return "No created or updated test files were reported, so the run cannot be considered verified."
+            return MISSING_REPORTED_TEST_FILES_REASON
 
         resolved_paths = resolve_reported_test_paths(
             reported_paths=reported_paths,
@@ -641,6 +665,19 @@ Test log excerpt:
             if reason:
                 return f"{path}: {reason}"
         return None
+
+    def _should_accept_existing_tests_without_changes(
+        self,
+        result: ControlResult,
+        test_attempted: bool,
+        test_ok: bool,
+    ) -> bool:
+        return (
+            not result.created_tests
+            and not result.updated_tests
+            and test_attempted
+            and test_ok
+        )
 
     def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
         return bool(manifest.custom_code_files)
