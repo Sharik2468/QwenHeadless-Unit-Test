@@ -47,6 +47,28 @@ class ControlResultParsingTests(unittest.TestCase):
         self.assertIn("report loaded", result.notes)
         self.assertIn("Ignored unsupported report fields: unexpected", result.notes)
 
+    def test_from_dict_normalizes_legacy_qwen_result_payload(self) -> None:
+        result = ControlResult.from_dict(
+            {
+                "control": SAMPLE_CONTROL,
+                "status": "fixed",
+                "existing_tests_preserved": False,
+                "test_file": f"C:/repo/tests/{SAMPLE_TEST_FILE}",
+                "tests_total": 5,
+                "tests_passed": 5,
+                "tests_failed": 0,
+                "changes": ["Fixed one assertion overload."],
+                "notes": "Existing tests were corrected.",
+            }
+        )
+
+        self.assertEqual(result.status, "fixed")
+        self.assertEqual(result.generation_outcome, "updated_existing_tests")
+        self.assertEqual(result.updated_tests, [f"C:/repo/tests/{SAMPLE_TEST_FILE}"])
+        self.assertEqual(result.created_tests, [])
+        self.assertIn("Existing tests were corrected.", result.notes)
+        self.assertIn("Fixed one assertion overload.", result.notes)
+
     def test_orchestrator_loads_extended_report_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
