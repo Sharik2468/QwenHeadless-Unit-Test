@@ -85,7 +85,7 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn("Inspect any existing tests for this control", prompt)
+            self.assertIn("You MUST inspect any existing tests for this control", prompt)
             self.assertIn("existing_tests_preserved", prompt)
             self.assertIn("compare them against the current control/theme/resource files", prompt)
 
