@@ -7,6 +7,18 @@ from pathlib import Path
 from uikit_testgen.models import ControlManifest, RunConfig
 from uikit_testgen.orchestrator import Orchestrator
 
+SAMPLE_CONTROL = "SampleStyledControl"
+
+
+def build_manifest(styles_root: Path) -> ControlManifest:
+    return ControlManifest(
+        name=SAMPLE_CONTROL,
+        kind="styled_control",
+        style_dir=styles_root / SAMPLE_CONTROL,
+        relative_dir=SAMPLE_CONTROL,
+        group_name=SAMPLE_CONTROL,
+    )
+
 
 class UIKitOrchestratorContextTests(unittest.TestCase):
     def test_research_prompt_for_styled_control_disallows_unit_tests(self) -> None:
@@ -31,13 +43,7 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
                 artifacts_dir=artifacts,
             )
             orchestrator = Orchestrator(config)
-            manifest = ControlManifest(
-                name="AdornerLayer",
-                kind="styled_control",
-                style_dir=styles_root / "AdornerLayer",
-                relative_dir="AdornerLayer",
-                group_name="AdornerLayer",
-            )
+            manifest = build_manifest(styles_root)
 
             prompt = orchestrator._build_research_prompt(manifest, artifacts / "research.json")
 
@@ -67,20 +73,14 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
                 artifacts_dir=artifacts,
             )
             orchestrator = Orchestrator(config)
-            manifest = ControlManifest(
-                name="AdornerLayer",
-                kind="styled_control",
-                style_dir=styles_root / "AdornerLayer",
-                relative_dir="AdornerLayer",
-                group_name="AdornerLayer",
-            )
+            manifest = build_manifest(styles_root)
 
             prompt = orchestrator._build_generation_prompt(
                 manifest,
-                artifacts / "controls" / "AdornerLayer" / "result.json",
+                artifacts / "controls" / SAMPLE_CONTROL / "result.json",
                 {
-                    "control": {"name": "AdornerLayer"},
-                    "existing_test_files": ["HeadlessTests/AdornerLayerTests.cs"],
+                    "control": {"name": SAMPLE_CONTROL},
+                    "existing_test_files": [f"HeadlessTests/{SAMPLE_CONTROL}Tests.cs"],
                     "existing_test_coverage": {"status": "partial"},
                 },
             )
@@ -112,19 +112,13 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
                     artifacts_dir=artifacts,
                 )
             )
-            manifest = ControlManifest(
-                name="AdornerLayer",
-                kind="styled_control",
-                style_dir=styles_root / "AdornerLayer",
-                relative_dir="AdornerLayer",
-                group_name="AdornerLayer",
-            )
+            manifest = build_manifest(styles_root)
 
             prompt = orchestrator._build_generation_prompt(
                 manifest,
-                artifacts / "controls" / "AdornerLayer" / "result.json",
+                artifacts / "controls" / SAMPLE_CONTROL / "result.json",
                 {
-                    "control": {"name": "AdornerLayer"},
+                    "control": {"name": SAMPLE_CONTROL},
                     "existing_test_files": [],
                     "existing_test_coverage": {"status": "none"},
                 },

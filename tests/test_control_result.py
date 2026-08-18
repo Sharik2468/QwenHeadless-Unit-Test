@@ -10,19 +10,22 @@ from testgen_shared.qwen import QwenRunResult
 from uikit_testgen.models import ControlManifest, ControlResult, RunConfig
 from uikit_testgen.orchestrator import Orchestrator
 
+SAMPLE_CONTROL = "SampleStyledControl"
+SAMPLE_TEST_FILE = f"{SAMPLE_CONTROL}Tests.cs"
+
 
 class ControlResultParsingTests(unittest.TestCase):
     def test_from_dict_accepts_existing_tests_preserved(self) -> None:
         result = ControlResult.from_dict(
             {
-                "control": "AdornerLayer",
+                "control": SAMPLE_CONTROL,
                 "status": "verified",
                 "existing_tests_preserved": True,
                 "notes": ["existing coverage reused"],
             }
         )
 
-        self.assertEqual(result.control, "AdornerLayer")
+        self.assertEqual(result.control, SAMPLE_CONTROL)
         self.assertEqual(result.status, "verified")
         self.assertTrue(result.existing_tests_preserved)
         self.assertEqual(result.notes, ["existing coverage reused"])
@@ -30,14 +33,14 @@ class ControlResultParsingTests(unittest.TestCase):
     def test_from_dict_ignores_unknown_fields_without_crashing(self) -> None:
         result = ControlResult.from_dict(
             {
-                "control": "AdornerLayer",
+                "control": SAMPLE_CONTROL,
                 "status": "partial",
                 "unexpected": {"value": 1},
                 "notes": ["report loaded"],
             }
         )
 
-        self.assertEqual(result.control, "AdornerLayer")
+        self.assertEqual(result.control, SAMPLE_CONTROL)
         self.assertEqual(result.status, "partial")
         self.assertIn("report loaded", result.notes)
         self.assertIn("Ignored unsupported report fields: unexpected", result.notes)
@@ -74,7 +77,7 @@ class ControlResultParsingTests(unittest.TestCase):
             report_path.write_text(
                 json.dumps(
                     {
-                        "control": "AdornerLayer",
+                        "control": SAMPLE_CONTROL,
                         "status": "verified",
                         "existing_tests_preserved": True,
                         "unexpected_field": "ignore me",
@@ -85,7 +88,7 @@ class ControlResultParsingTests(unittest.TestCase):
 
             result = orchestrator._load_or_fallback_result(
                 report_path=report_path,
-                control_name="AdornerLayer",
+                control_name=SAMPLE_CONTROL,
                 build_log_path=artifacts_dir / "build.log",
                 test_log_path=artifacts_dir / "test.log",
                 qwen_result=QwenRunResult(
@@ -100,7 +103,7 @@ class ControlResultParsingTests(unittest.TestCase):
                 test_ok=True,
             )
 
-            self.assertEqual(result.control, "AdornerLayer")
+            self.assertEqual(result.control, SAMPLE_CONTROL)
             self.assertEqual(result.status, "verified")
             self.assertTrue(result.existing_tests_preserved)
             self.assertIn("Ignored unsupported report fields: unexpected_field", result.notes)
@@ -113,8 +116,8 @@ class ControlResultParsingTests(unittest.TestCase):
             unit_project = repo_root / "tests/Unit/Unit.csproj"
             headless_project = repo_root / "tests/Headless/Headless.csproj"
             styles_root = repo_root / "styles"
-            style_dir = styles_root / "AdornerLayer"
-            related_file = style_dir / "AdornerLayerTheme.axaml"
+            style_dir = styles_root / SAMPLE_CONTROL
+            related_file = style_dir / f"{SAMPLE_CONTROL}Theme.axaml"
             artifacts_dir = root / "artifacts"
 
             unit_project.parent.mkdir(parents=True)
@@ -135,11 +138,11 @@ class ControlResultParsingTests(unittest.TestCase):
                 )
             )
             manifest = ControlManifest(
-                name="AdornerLayer",
+                name=SAMPLE_CONTROL,
                 kind="styled_control",
                 style_dir=style_dir,
-                relative_dir="AdornerLayer",
-                group_name="AdornerLayer",
+                relative_dir=SAMPLE_CONTROL,
+                group_name=SAMPLE_CONTROL,
                 related_files=[related_file],
             )
             qwen_result = QwenRunResult(
@@ -150,17 +153,17 @@ class ControlResultParsingTests(unittest.TestCase):
                 assistant_messages=["Existing coverage already looks sufficient."],
                 raw_events=[],
             )
-            report_path = artifacts_dir / "controls" / "AdornerLayer" / "result.json"
+            report_path = artifacts_dir / "controls" / SAMPLE_CONTROL / "result.json"
             report_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.write_text(
                 json.dumps(
                     {
-                        "control": "AdornerLayer",
+                        "control": SAMPLE_CONTROL,
                         "status": "partial",
                         "created_tests": [],
                         "updated_tests": [],
                         "existing_tests_preserved": True,
-                        "notes": ["Reviewed existing AdornerLayer tests against current theme files."],
+                        "notes": [f"Reviewed existing {SAMPLE_CONTROL} tests against current theme files."],
                     }
                 ),
                 encoding="utf-8",
@@ -170,7 +173,7 @@ class ControlResultParsingTests(unittest.TestCase):
                 patch.object(
                     orchestrator,
                     "_ensure_research_summary",
-                    return_value={"summary": "ok", "existing_test_files": ["AdornerLayerTests.cs"]},
+                    return_value={"summary": "ok", "existing_test_files": [SAMPLE_TEST_FILE]},
                 ),
                 patch.object(orchestrator, "_build_generation_prompt", return_value="prompt"),
                 patch.object(orchestrator, "_invoke_generation", return_value=qwen_result),
@@ -183,7 +186,7 @@ class ControlResultParsingTests(unittest.TestCase):
             mocked_tests.assert_called_once()
 
             result_payload = json.loads(
-                (artifacts_dir / "controls" / "AdornerLayer" / "result.json").read_text(encoding="utf-8")
+                (artifacts_dir / "controls" / SAMPLE_CONTROL / "result.json").read_text(encoding="utf-8")
             )
             self.assertEqual(result_payload["status"], "verified")
             self.assertTrue(result_payload["existing_tests_preserved"])
@@ -204,10 +207,10 @@ class ControlResultParsingTests(unittest.TestCase):
             unit_project = repo_root / "tests/Unit/Unit.csproj"
             headless_project = repo_root / "tests/Headless/Headless.csproj"
             styles_root = repo_root / "styles"
-            style_dir = styles_root / "AdornerLayer"
-            related_file = style_dir / "AdornerLayerTheme.axaml"
+            style_dir = styles_root / SAMPLE_CONTROL
+            related_file = style_dir / f"{SAMPLE_CONTROL}Theme.axaml"
             artifacts_dir = root / "artifacts"
-            generated_test_file = headless_project.parent / "AdornerLayerTests.cs"
+            generated_test_file = headless_project.parent / SAMPLE_TEST_FILE
 
             unit_project.parent.mkdir(parents=True)
             headless_project.parent.mkdir(parents=True)
@@ -228,14 +231,14 @@ class ControlResultParsingTests(unittest.TestCase):
                 )
             )
             manifest = ControlManifest(
-                name="AdornerLayer",
+                name=SAMPLE_CONTROL,
                 kind="styled_control",
                 style_dir=style_dir,
-                relative_dir="AdornerLayer",
-                group_name="AdornerLayer",
+                relative_dir=SAMPLE_CONTROL,
+                group_name=SAMPLE_CONTROL,
                 related_files=[related_file],
             )
-            report_path = artifacts_dir / "controls" / "AdornerLayer" / "result.json"
+            report_path = artifacts_dir / "controls" / SAMPLE_CONTROL / "result.json"
             initial_result = QwenRunResult(
                 returncode=0,
                 stdout="[]",
@@ -268,9 +271,9 @@ class ControlResultParsingTests(unittest.TestCase):
                 report_path.write_text(
                     json.dumps(
                         {
-                            "control": "AdornerLayer",
+                            "control": SAMPLE_CONTROL,
                             "status": "partial",
-                            "created_tests": ["AdornerLayerTests.cs"],
+                            "created_tests": [SAMPLE_TEST_FILE],
                             "updated_tests": [],
                             "notes": ["Created runtime headless coverage."],
                         }
@@ -299,7 +302,7 @@ class ControlResultParsingTests(unittest.TestCase):
 
             result_payload = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(result_payload["status"], "verified")
-            self.assertEqual(result_payload["created_tests"], ["AdornerLayerTests.cs"])
+            self.assertEqual(result_payload["created_tests"], [SAMPLE_TEST_FILE])
             self.assertTrue(result_payload["build"]["attempted"])
             self.assertTrue(result_payload["test_run"]["attempted"])
 
