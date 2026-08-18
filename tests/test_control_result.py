@@ -184,8 +184,8 @@ class ControlResultParsingTests(unittest.TestCase):
             ):
                 orchestrator._process_control(manifest, {"controls": {}})
 
-            mocked_builds.assert_called_once()
-            mocked_tests.assert_called_once()
+            self.assertEqual(mocked_builds.call_count, 2)
+            self.assertEqual(mocked_tests.call_count, 2)
 
             result_payload = json.loads(
                 (artifacts_dir / "controls" / SAMPLE_CONTROL / "result.json").read_text(encoding="utf-8")
@@ -195,8 +195,12 @@ class ControlResultParsingTests(unittest.TestCase):
             self.assertEqual(result_payload["generation_outcome"], "preserved_existing_tests")
             self.assertTrue(result_payload["build"]["attempted"])
             self.assertTrue(result_payload["build"]["passed"])
+            self.assertTrue(result_payload["build"]["baseline_attempted"])
+            self.assertTrue(result_payload["build"]["baseline_passed"])
             self.assertTrue(result_payload["test_run"]["attempted"])
             self.assertTrue(result_payload["test_run"]["passed"])
+            self.assertTrue(result_payload["test_run"]["baseline_attempted"])
+            self.assertTrue(result_payload["test_run"]["baseline_passed"])
             self.assertIn(
                 "Existing tests were reviewed, preserved, and verified against the current control filter.",
                 result_payload["notes"],
