@@ -277,6 +277,7 @@ class Orchestrator:
                 self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                 return
             if self._resolve_generation_outcome(result) == "preserved_existing_tests":
+                result.generation_outcome = "preserved_existing_tests"
                 result.existing_tests_preserved = True
                 result.notes.append(
                     "Existing tests were reviewed, preserved, and verified against the current control filter."
@@ -409,6 +410,7 @@ class Orchestrator:
                     self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                     return
                 if self._resolve_generation_outcome(result) == "preserved_existing_tests":
+                    result.generation_outcome = "preserved_existing_tests"
                     result.existing_tests_preserved = True
                     result.notes.append(
                         "Existing tests were reviewed, preserved, and verified against the current control filter."

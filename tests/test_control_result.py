@@ -192,12 +192,13 @@ class ControlResultParsingTests(unittest.TestCase):
             )
             self.assertEqual(result_payload["status"], "verified")
             self.assertTrue(result_payload["existing_tests_preserved"])
+            self.assertEqual(result_payload["generation_outcome"], "preserved_existing_tests")
             self.assertTrue(result_payload["build"]["attempted"])
             self.assertTrue(result_payload["build"]["passed"])
             self.assertTrue(result_payload["test_run"]["attempted"])
             self.assertTrue(result_payload["test_run"]["passed"])
             self.assertIn(
-                "No test files were changed; existing tests matching the control filter were executed and passed.",
+                "Existing tests were reviewed, preserved, and verified against the current control filter.",
                 result_payload["notes"],
             )
 
