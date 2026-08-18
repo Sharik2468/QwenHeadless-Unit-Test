@@ -498,6 +498,7 @@ class Orchestrator:
         manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
         research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
         coverage_status = self._research_coverage_status(research_summary)
+        next_action = self._research_next_action(research_summary)
         existing_test_guidance = {
             "none": "Research found no existing control-specific tests. Initial generation must create at least one meaningful headless runtime test file unless you can prove runtime verification is not feasible; do not leave the control unchanged on the first pass.",
             "adequate": "Research found adequate existing control-specific tests. You may preserve them only after re-inspecting them against the current control/theme/resource files and only if they still match the current behavior.",
@@ -549,6 +550,9 @@ Unit test policy:
 Existing test guidance:
 {existing_test_guidance}
 
+Research next_action:
+{next_action}
+
 Reference files and directories to inspect before guessing APIs, control types, namespaces, or test patterns:
 {reference_section}
 
@@ -568,6 +572,11 @@ Tasks:
    - visual-tree traversal utilities
    - how existing tests access runtime-applied values
 5. Create or update tests in the specified test projects when coverage is missing or stale. If existing tests are still correct after inspection, keep them unchanged and mark `existing_tests_preserved: true` in the report.
+5a. Treat the research summary as the default decision for this phase:
+   - create_tests -> create meaningful tests
+   - update_tests -> update existing tests
+   - preserve_tests -> inspect and preserve only if still valid
+   - manual_review -> do not invent weak tests; explain why manual review is needed
 6. Build the affected test projects.
 7. Run relevant tests for this control.
 8. If build/tests fail, fix up to the limits of this run.
@@ -675,7 +684,7 @@ Test log excerpt:
         build_log_path: Path,
         test_log_path: Path,
     ) -> dict[str, Any]:
-        if not self._research_has_existing_tests(research_summary):
+        if self._research_next_action(research_summary) not in {"update_tests", "preserve_tests"}:
             return {
                 "attempted": False,
                 "build": {"attempted": False, "passed": False, "log_file": str(build_log_path)},
@@ -802,11 +811,11 @@ Test log excerpt:
         research_summary: dict[str, Any],
     ) -> bool:
         outcome = self._resolve_generation_outcome(result)
-        if outcome in {"generated_new_tests", "updated_existing_tests"}:
-            return True
-        if outcome == "preserved_existing_tests":
-            return self._can_preserve_existing_tests(research_summary)
-        return False
+        return outcome in {
+            "generated_new_tests",
+            "updated_existing_tests",
+            "preserved_existing_tests",
+        }
 
     def _can_preserve_existing_tests(self, research_summary: dict[str, Any]) -> bool:
         return self._research_coverage_status(research_summary) == "adequate"
@@ -885,6 +894,19 @@ Test log excerpt:
             return False
         return any(str(path).strip() for path in existing_test_files)
 
+    def _research_next_action(self, research_summary: dict[str, Any]) -> str:
+        next_action = str(research_summary.get("next_action", "")).strip().lower()
+        if next_action in {"create_tests", "update_tests", "preserve_tests", "manual_review"}:
+            return next_action
+        coverage_status = self._research_coverage_status(research_summary)
+        return {
+            "none": "create_tests",
+            "adequate": "preserve_tests",
+            "partial": "update_tests",
+            "stale": "update_tests",
+            "unknown": "update_tests",
+        }[coverage_status]
+
     def _research_coverage_status(self, research_summary: dict[str, Any]) -> str:
         return self._normalized_existing_test_coverage(research_summary)["status"]
 
@@ -939,6 +961,7 @@ Test log excerpt:
         normalized_coverage = self._normalized_existing_test_coverage(normalized)
         normalized["existing_test_files"] = normalized_coverage["files"]
         normalized["existing_test_coverage"] = normalized_coverage
+        normalized["next_action"] = self._research_next_action(normalized)
         return normalized
 
     def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
@@ -1003,6 +1026,7 @@ Test log excerpt:
                 "allowed_test_projects": ["headless"] if not self._should_run_unit_tests(manifest) else ["headless", "unit"],
                 "existing_test_files": [],
                 "existing_test_coverage": {"status": "unknown", "files": [], "gaps": [], "notes": []},
+                "next_action": "update_tests",
                 "must_verify": [],
                 "avoid": ["Do not invent APIs or namespaces."],
             }
@@ -1051,6 +1075,7 @@ Research output requirements:
   - allowed_test_projects
   - existing_test_files
   - existing_test_coverage
+  - next_action
   - must_verify
   - avoid
   - summary
@@ -1061,12 +1086,18 @@ Research output requirements:
     "gaps": [],
     "notes": []
   }}
+- `next_action` must be one of:
+  - create_tests
+  - update_tests
+  - preserve_tests
+  - manual_review
 
 Rules:
 - Prefer narrow, concrete findings over broad narration.
 - Identify the CLR type/namespace only if you can confirm it from the inspected sources.
 - If a type/member/visual structure cannot be confirmed, list it in avoid instead of guessing.
 - Inspect existing control-specific tests, if any, and state whether they already cover the current control or appear stale/incomplete.
+- Set `next_action` for the next phase instead of leaving the Python orchestrator to infer the semantic intent.
 - Keep the summary compact so a fresh implementation session can use it without replaying all exploration context.
 
 Return a short plain-text summary after writing the JSON file.

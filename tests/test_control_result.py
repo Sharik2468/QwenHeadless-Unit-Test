@@ -175,7 +175,11 @@ class ControlResultParsingTests(unittest.TestCase):
                 patch.object(
                     orchestrator,
                     "_ensure_research_summary",
-                    return_value={"summary": "ok", "existing_test_files": [SAMPLE_TEST_FILE]},
+                    return_value={
+                        "summary": "ok",
+                        "existing_test_files": [SAMPLE_TEST_FILE],
+                        "next_action": "preserve_tests",
+                    },
                 ),
                 patch.object(orchestrator, "_build_generation_prompt", return_value="prompt"),
                 patch.object(orchestrator, "_invoke_generation", return_value=qwen_result),
@@ -293,7 +297,7 @@ class ControlResultParsingTests(unittest.TestCase):
                 patch.object(
                     orchestrator,
                     "_ensure_research_summary",
-                    return_value={"summary": "ok", "existing_test_files": []},
+                    return_value={"summary": "ok", "existing_test_files": [], "next_action": "create_tests"},
                 ),
                 patch.object(orchestrator, "_build_generation_prompt", return_value="prompt"),
                 patch.object(orchestrator, "_build_repair_prompt", return_value="repair"),
@@ -313,7 +317,7 @@ class ControlResultParsingTests(unittest.TestCase):
             self.assertTrue(result_payload["build"]["attempted"])
             self.assertTrue(result_payload["test_run"]["attempted"])
 
-    def test_preserve_existing_tests_requires_adequate_research_status(self) -> None:
+    def test_preserve_existing_tests_does_not_depend_on_python_coverage_gating(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             unit_project = root / "tests/Unit/Unit.csproj"
@@ -347,15 +351,17 @@ class ControlResultParsingTests(unittest.TestCase):
                     result,
                     {
                         "existing_test_files": [SAMPLE_TEST_FILE],
+                        "next_action": "preserve_tests",
                         "existing_test_coverage": {"status": "adequate", "files": [SAMPLE_TEST_FILE]},
                     },
                 )
             )
-            self.assertFalse(
+            self.assertTrue(
                 orchestrator._should_attempt_verification(
                     result,
                     {
                         "existing_test_files": [SAMPLE_TEST_FILE],
+                        "next_action": "preserve_tests",
                         "existing_test_coverage": {"status": "partial", "files": [SAMPLE_TEST_FILE]},
                     },
                 )

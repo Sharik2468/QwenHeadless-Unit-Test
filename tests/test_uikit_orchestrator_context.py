@@ -51,6 +51,7 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             self.assertIn("Writing the research summary artifact requested below is required and explicitly allowed.", prompt)
             self.assertIn("Inspect existing control-specific tests, if any", prompt)
             self.assertIn('"status": "none|partial|adequate|stale|unknown"', prompt)
+            self.assertIn("next_action", prompt)
 
     def test_generation_prompt_requires_existing_test_review_before_preserving(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -83,12 +84,14 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
                     "control": {"name": SAMPLE_CONTROL},
                     "existing_test_files": [f"HeadlessTests/{SAMPLE_CONTROL}Tests.cs"],
                     "existing_test_coverage": {"status": "partial"},
+                    "next_action": "update_tests",
                 },
             )
 
             self.assertIn("You MUST inspect any existing tests for this control", prompt)
             self.assertIn("generation_outcome", prompt)
             self.assertIn("existing_tests_preserved", prompt)
+            self.assertIn("Research next_action", prompt)
             self.assertIn("compare them against the current control/theme/resource files", prompt)
 
     def test_generation_prompt_requires_new_tests_when_research_found_none(self) -> None:
@@ -123,10 +126,12 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
                     "control": {"name": SAMPLE_CONTROL},
                     "existing_test_files": [],
                     "existing_test_coverage": {"status": "none"},
+                    "next_action": "create_tests",
                 },
             )
 
             self.assertIn("Research found no existing control-specific tests", prompt)
+            self.assertIn("create_tests -> create meaningful tests", prompt)
             self.assertIn("must create at least one meaningful headless runtime test file", prompt)
 
     def test_extra_include_directories_collects_external_reference_roots(self) -> None:
