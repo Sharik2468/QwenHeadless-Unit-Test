@@ -475,6 +475,8 @@ Hard constraints:
 8. Write a JSON report file to the requested report path.
 9. Invalid tests must NOT be generated. Specifically, do not generate tests that only compare token names, ResourceKey strings, or other static constants without exercising a real control instance or runtime resource application.
 10. If meaningful runtime verification is not possible for a token or style binding, do not replace it with a weak string-based test. Record the gap in unresolved_issues and stop.
+11. You MUST inspect any existing tests for this control before deciding that no test-file changes are needed. Compare the current control/theme/resource files against existing tests and update those tests if the coverage is stale, incomplete, or no longer matches runtime behavior.
+12. If existing tests already cover the current control and truly do not need edits, set `existing_tests_preserved` to true in the final report and explain in `notes` what you reviewed. Do not set that flag unless you actually inspected the current control files and the existing tests.
 
 Target control:
 {manifest_json}
@@ -497,20 +499,21 @@ Research summary from a separate exploration session:
 
 Tasks:
 1. Analyze the target control.
-2. Decide which tests are appropriate:
+2. Inspect any existing control-specific tests in the allowed test projects and compare them against the current control/theme/resource files before deciding whether updates are needed.
+3. Decide which tests are appropriate:
    - headless runtime style/state tests
    - unit tests for custom logic only when the control has repository-owned custom code files
    - skip fake/low-value tests entirely
-3. Use the reference files/directories above before making assumptions about:
+4. Use the reference files/directories above before making assumptions about:
    - control CLR types or namespaces
    - headless helper patterns
    - visual-tree traversal utilities
    - how existing tests access runtime-applied values
-4. Create or update tests in the specified test projects.
-5. Build the affected test projects.
-6. Run relevant tests for this control.
-7. If build/tests fail, fix up to the limits of this run.
-8. Write the final report JSON to:
+5. Create or update tests in the specified test projects when coverage is missing or stale. If existing tests are still correct after inspection, keep them unchanged and mark `existing_tests_preserved: true` in the report.
+6. Build the affected test projects.
+7. Run relevant tests for this control.
+8. If build/tests fail, fix up to the limits of this run.
+9. Write the final report JSON to:
 {report_path}
 
 The final report JSON must include:
@@ -518,6 +521,7 @@ The final report JSON must include:
 - status
 - created_tests
 - updated_tests
+- existing_tests_preserved (set to true only when you inspected existing tests and intentionally kept them unchanged)
 - checks_added
 - unresolved_issues
 - build
@@ -550,6 +554,8 @@ Only modify tests related to {control_name}. Prefer stable assertions. If some c
 keep the reliable tests and record unresolved cases in the report file for this control.
 Do NOT degrade into tests that only check ResourceKey values, token names, or TryFindResource-only resource existence.
 If meaningful runtime verification cannot be restored, stop and keep the control in manual_review instead of weakening the assertions.
+Inspect any existing tests for this control before deciding that no test-file changes are needed. If the control/theme/resource files changed relative to existing coverage, update the tests accordingly.
+Only keep tests unchanged when they still match the current control behavior after inspection; in that case, set `existing_tests_preserved` to true in the report and explain what you reviewed in `notes`.
 Re-inspect these reference files/directories before guessing APIs or helper patterns:
 {reference_section}
 
@@ -675,6 +681,7 @@ Test log excerpt:
         return (
             not result.created_tests
             and not result.updated_tests
+            and result.existing_tests_preserved is True
             and test_attempted
             and test_ok
         )
@@ -729,6 +736,8 @@ Test log excerpt:
                 "summary": qwen_result.assistant_messages[-1] if qwen_result.assistant_messages else "",
                 "control_type": None,
                 "allowed_test_projects": ["headless"] if not self._should_run_unit_tests(manifest) else ["headless", "unit"],
+                "existing_test_files": [],
+                "existing_test_coverage": {"status": "unknown", "details": []},
                 "must_verify": [],
                 "avoid": ["Do not invent APIs or namespaces."],
             }
@@ -772,6 +781,8 @@ Research output requirements:
   - control_type
   - relevant_reference_files
   - allowed_test_projects
+  - existing_test_files
+  - existing_test_coverage
   - must_verify
   - avoid
   - summary
@@ -780,6 +791,7 @@ Rules:
 - Prefer narrow, concrete findings over broad narration.
 - Identify the CLR type/namespace only if you can confirm it from the inspected sources.
 - If a type/member/visual structure cannot be confirmed, list it in avoid instead of guessing.
+- Inspect existing control-specific tests, if any, and state whether they already cover the current control or appear stale/incomplete.
 - Keep the summary compact so a fresh implementation session can use it without replaying all exploration context.
 
 Return a short plain-text summary after writing the JSON file.

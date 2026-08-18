@@ -150,6 +150,21 @@ class ControlResultParsingTests(unittest.TestCase):
                 assistant_messages=["Existing coverage already looks sufficient."],
                 raw_events=[],
             )
+            report_path = artifacts_dir / "controls" / "AdornerLayer" / "result.json"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "control": "AdornerLayer",
+                        "status": "partial",
+                        "created_tests": [],
+                        "updated_tests": [],
+                        "existing_tests_preserved": True,
+                        "notes": ["Reviewed existing AdornerLayer tests against current theme files."],
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             with (
                 patch.object(orchestrator, "_ensure_research_summary", return_value={"summary": "ok"}),
