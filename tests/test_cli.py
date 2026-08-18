@@ -41,6 +41,40 @@ class CliConfigTests(unittest.TestCase):
             self.assertEqual(config.styles_root, styles)
             self.assertEqual(config.custom_controls_root, styles)
 
+    def test_build_config_preserves_reference_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            unit = repo_root / "Avalonia/NSCore.UIKit.Controls.UnitTests/NSCore.UIKit.Controls.UnitTests.csproj"
+            headless = (
+                repo_root
+                / "Avalonia/NSCore.UIKit.Headless.XUnit.UnitTests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj"
+            )
+            styles = repo_root / "Avalonia/NSCore.Avalonia.Theme/Controls"
+            reference_dir = repo_root / "external-ref"
+            unit.parent.mkdir(parents=True)
+            headless.parent.mkdir(parents=True)
+            styles.mkdir(parents=True)
+            reference_dir.mkdir(parents=True)
+            unit.write_text("<Project />", encoding="utf-8")
+            headless.write_text("<Project />", encoding="utf-8")
+
+            parser = build_parser()
+            args = parser.parse_args(
+                [
+                    "discover",
+                    "--repo-root",
+                    str(repo_root),
+                    "--artifacts-dir",
+                    str(repo_root / ".artifacts"),
+                    "--reference-path",
+                    str(reference_dir),
+                ]
+            )
+
+            config = build_config(args)
+
+            self.assertEqual(config.reference_paths, [reference_dir])
+
 
 if __name__ == "__main__":
     unittest.main()

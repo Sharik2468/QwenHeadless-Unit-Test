@@ -119,6 +119,21 @@ class QwenOutputParsingTests(unittest.TestCase):
         self.assertNotIn("--approval-mode", command)
         self.assertNotIn("-p", command)
 
+    def test_build_qwen_command_can_include_extra_directories(self) -> None:
+        command = build_qwen_command(
+            qwen_bin="qwen",
+            model="qwen3.6-27b-fp8",
+            approval_mode="default",
+            max_session_turns=10,
+            max_wall_time=None,
+            max_tool_calls=None,
+            include_directories=[Path("/tmp/one"), Path("/tmp/two")],
+        )
+
+        self.assertIn("--include-directories", command)
+        self.assertIn("/tmp/one", command)
+        self.assertIn("/tmp/two", command)
+
 
 if __name__ == "__main__":
     unittest.main()

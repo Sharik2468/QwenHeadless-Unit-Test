@@ -370,10 +370,17 @@ class Orchestrator:
             max_tool_calls=tool_calls or self.config.max_tool_calls,
             output_path=output_path,
             resume_session_id=resume_session_id,
+            include_directories=self._extra_include_directories(),
         )
 
     def _build_generation_prompt(self, manifest: ControlManifest, report_path: Path) -> str:
         relevant_files = "\n".join(f"- {path}" for path in manifest.related_files)
+        reference_paths = self._gather_reference_paths()
+        reference_section = (
+            "\n".join(f"- {path}" for path in reference_paths)
+            if reference_paths
+            else "- None provided."
+        )
         manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
         unit_test_policy = (
             "This control has repository-owned custom code files, so classic unit tests for its custom logic are allowed."
@@ -414,17 +421,25 @@ Projects:
 Unit test policy:
 {unit_test_policy}
 
+Reference files and directories to inspect before guessing APIs, control types, namespaces, or test patterns:
+{reference_section}
+
 Tasks:
 1. Analyze the target control.
 2. Decide which tests are appropriate:
    - headless runtime style/state tests
    - unit tests for custom logic only when the control has repository-owned custom code files
    - skip fake/low-value tests entirely
-3. Create or update tests in the specified test projects.
-4. Build the affected test projects.
-5. Run relevant tests for this control.
-6. If build/tests fail, fix up to the limits of this run.
-7. Write the final report JSON to:
+3. Use the reference files/directories above before making assumptions about:
+   - control CLR types or namespaces
+   - headless helper patterns
+   - visual-tree traversal utilities
+   - how existing tests access runtime-applied values
+4. Create or update tests in the specified test projects.
+5. Build the affected test projects.
+6. Run relevant tests for this control.
+7. If build/tests fail, fix up to the limits of this run.
+8. Write the final report JSON to:
 {report_path}
 
 The final report JSON must include:
@@ -445,12 +460,20 @@ Return a short final summary in plain text after writing the report.
 """
 
     def _build_repair_prompt(self, control_name: str, build_log: str, test_log: str) -> str:
+        reference_paths = self._gather_reference_paths()
+        reference_section = (
+            "\n".join(f"- {path}" for path in reference_paths)
+            if reference_paths
+            else "- None provided."
+        )
         return f"""Fix the generated tests for control {control_name}.
 
 Only modify tests related to {control_name}. Prefer stable assertions. If some checks are too brittle,
 keep the reliable tests and record unresolved cases in the report file for this control.
 Do NOT degrade into tests that only check ResourceKey values, token names, or TryFindResource-only resource existence.
 If meaningful runtime verification cannot be restored, stop and keep the control in manual_review instead of weakening the assertions.
+Re-inspect these reference files/directories before guessing APIs or helper patterns:
+{reference_section}
 
 Build log excerpt:
 {build_log[-12000:]}
@@ -584,6 +607,40 @@ Test log excerpt:
             "log_file": str(test_log_path),
             "failed_tests": [],
         }
+
+    def _gather_reference_paths(self) -> list[Path]:
+        auto_reference_candidates = [
+            self.config.headless_tests_project.parent / "HeadlessTestBase.cs",
+            self.config.headless_tests_project.parent / "ButtonTest" / "ButtonTestsBase.cs",
+            self.config.headless_tests_project.parent / "ButtonTest" / "ButtonTestHelpers.cs",
+            *self.config.reference_paths,
+        ]
+        seen: set[Path] = set()
+        resolved: list[Path] = []
+        for path in auto_reference_candidates:
+            if not path.exists():
+                continue
+            resolved_path = path.resolve()
+            if resolved_path in seen:
+                continue
+            seen.add(resolved_path)
+            resolved.append(path)
+        return resolved
+
+    def _extra_include_directories(self) -> list[Path]:
+        include_dirs: list[Path] = []
+        for path in [self.config.custom_controls_root, *self.config.reference_paths]:
+            if path is None:
+                continue
+            directory = path if path.is_dir() else path.parent
+            try:
+                if directory.resolve().is_relative_to(self.config.repo_root.resolve()):
+                    continue
+            except FileNotFoundError:
+                pass
+            if directory.exists() and directory not in include_dirs:
+                include_dirs.append(directory)
+        return include_dirs
 
     def _run_subprocess(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         try:

@@ -94,6 +94,7 @@ class RunConfig:
     test_after_each_control: bool = True
     unit_test_filter: str = "FullyQualifiedName~{control}"
     headless_test_filter: str = "FullyQualifiedName~{control}"
+    reference_paths: list[Path] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return _stringify_paths(asdict(self))

@@ -60,6 +60,7 @@ def run_qwen(
     max_tool_calls: int | None,
     output_path: Path,
     resume_session_id: str | None = None,
+    include_directories: list[Path] | None = None,
 ) -> QwenRunResult:
     command = build_qwen_command(
         qwen_bin=qwen_bin,
@@ -69,6 +70,7 @@ def run_qwen(
         max_wall_time=max_wall_time,
         max_tool_calls=max_tool_calls,
         resume_session_id=resume_session_id,
+        include_directories=include_directories,
     )
 
     try:
@@ -116,6 +118,7 @@ def build_qwen_command(
     max_wall_time: str | None,
     max_tool_calls: int | None,
     resume_session_id: str | None = None,
+    include_directories: list[Path] | None = None,
 ) -> list[str]:
     command = [
         qwen_bin,
@@ -130,6 +133,8 @@ def build_qwen_command(
         command.extend(["--max-wall-time", str(max_wall_time)])
     if max_tool_calls is not None:
         command.extend(["--max-tool-calls", str(max_tool_calls)])
+    for directory in include_directories or []:
+        command.extend(["--include-directories", str(directory)])
     if approval_mode == "yolo":
         command.append("-y")
     else:
