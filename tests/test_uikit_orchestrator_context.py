@@ -42,6 +42,7 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             prompt = orchestrator._build_research_prompt(manifest, artifacts / "research.json")
 
             self.assertIn("Do NOT plan classic unit tests", prompt)
+            self.assertIn("Writing the research summary artifact requested below is required and explicitly allowed.", prompt)
 
     def test_extra_include_directories_collects_external_reference_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

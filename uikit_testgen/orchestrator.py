@@ -188,16 +188,28 @@ class Orchestrator:
             result.notes.append(
                 "Generation stopped before build because the produced tests already degraded into low-value checks."
             )
-            self._apply_execution_outcome(result, build_ok=False, test_ok=False, build_log_path=build_log_path, test_log_path=test_log_path)
+            self._apply_execution_outcome(
+                result,
+                build_ok=False,
+                test_ok=False,
+                build_log_path=build_log_path,
+                test_log_path=test_log_path,
+                build_attempted=False,
+                test_attempted=False,
+            )
             self._write_result(report_path, result)
             self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
             return
 
         build_ok = True
         test_ok = True
+        build_attempted = False
+        test_attempted = False
         if self.config.build_after_each_control:
+            build_attempted = True
             build_ok = self._run_builds(build_log_path)
         if build_ok and self.config.test_after_each_control:
+            test_attempted = True
             test_ok = self._run_tests(manifest, test_log_path)
 
         if build_ok and test_ok:
@@ -216,6 +228,8 @@ class Orchestrator:
                 test_ok=test_ok,
                 build_log_path=build_log_path,
                 test_log_path=test_log_path,
+                build_attempted=build_attempted,
+                test_attempted=test_attempted,
             )
             quality_issue = self._evaluate_generated_test_quality(result, manifest)
             if quality_issue:
@@ -293,12 +307,22 @@ class Orchestrator:
                 result.notes.append(
                     "Repair loop stopped because the generated tests degraded into low-value checks."
                 )
-                self._apply_execution_outcome(result, build_ok=False, test_ok=False, build_log_path=build_log_path, test_log_path=test_log_path)
+                self._apply_execution_outcome(
+                    result,
+                    build_ok=False,
+                    test_ok=False,
+                    build_log_path=build_log_path,
+                    test_log_path=test_log_path,
+                    build_attempted=False,
+                    test_attempted=False,
+                )
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                 return
 
+            build_attempted = True
             build_ok = self._run_builds(build_log_path)
+            test_attempted = build_ok and self.config.test_after_each_control
             test_ok = build_ok and self._run_tests(manifest, test_log_path)
             if build_ok and test_ok:
                 result = self._load_or_fallback_result(
@@ -316,6 +340,8 @@ class Orchestrator:
                     test_ok=test_ok,
                     build_log_path=build_log_path,
                     test_log_path=test_log_path,
+                    build_attempted=build_attempted,
+                    test_attempted=test_attempted,
                 )
                 quality_issue = self._evaluate_generated_test_quality(result, manifest)
                 if quality_issue:
@@ -353,6 +379,8 @@ class Orchestrator:
             test_ok=test_ok,
             build_log_path=build_log_path,
             test_log_path=test_log_path,
+            build_attempted=build_attempted,
+            test_attempted=test_attempted,
         )
         result.status = "manual_review"
         result.notes.append("Automatic repair attempts exhausted.")
@@ -624,14 +652,16 @@ Test log excerpt:
         test_ok: bool,
         build_log_path: Path,
         test_log_path: Path,
+        build_attempted: bool,
+        test_attempted: bool,
     ) -> None:
         result.build = {
-            "attempted": self.config.build_after_each_control,
+            "attempted": build_attempted,
             "passed": build_ok,
             "log_file": str(build_log_path),
         }
         result.test_run = {
-            "attempted": self.config.test_after_each_control,
+            "attempted": test_attempted,
             "passed": test_ok,
             "log_file": str(test_log_path),
             "failed_tests": [],
@@ -683,7 +713,8 @@ Test log excerpt:
         )
         return f"""You are the research phase for one Avalonia UIKit control.
 
-Do NOT write tests, do NOT build projects, and do NOT modify repository files during this phase.
+Do NOT write tests, do NOT build projects, and do NOT modify repository source/test files during this phase.
+Writing the research summary artifact requested below is required and explicitly allowed.
 Your only goal is to inspect the control, framework sources, and existing test helpers so the implementation phase can start from a compact, grounded summary instead of guessing.
 
 Target control manifest:
