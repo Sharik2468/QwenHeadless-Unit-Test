@@ -581,6 +581,7 @@ Hard constraints:
 12. If existing tests already cover the current control and truly do not need edits, set `existing_tests_preserved` to true in the final report and explain in `notes` what you reviewed. Do not set that flag unless you actually inspected the current control files and the existing tests.
 13. The report file MUST be valid JSON using only the canonical fields listed below. Do NOT invent alternative field names such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
 14. `notes` MUST always be a JSON array of strings. `created_tests` and `updated_tests` MUST always be JSON arrays of strings, even when empty.
+15. Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
 
 Target control:
 {manifest_json}
@@ -700,6 +701,7 @@ Only keep tests unchanged when they still match the current control behavior aft
 {existing_test_guidance}
 When you rewrite the report JSON, use ONLY the canonical fields expected by the orchestrator. Do NOT emit legacy/free-form fields such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
 `notes` must remain a JSON array of strings; do not collapse it into a single string.
+Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
 Re-inspect these reference files/directories before guessing APIs or helper patterns:
 {reference_section}
 
@@ -1121,6 +1123,7 @@ Test log excerpt:
 Do NOT write tests, do NOT build projects, and do NOT modify repository source/test files during this phase.
 Writing the research summary artifact requested below is required and explicitly allowed.
 Your only goal is to inspect the control, framework sources, and existing test helpers so the implementation phase can start from a compact, grounded summary instead of guessing.
+Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
 
 Target control manifest:
 {manifest_json}
