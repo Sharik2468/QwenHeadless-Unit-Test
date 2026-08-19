@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,9 @@ class Orchestrator:
         self.progress_path = self.config.artifacts_dir / "progress.json"
         self.manifest_path = self.config.artifacts_dir / "controls_manifest.json"
 
+    def _log(self, message: str) -> None:
+        print(message, file=sys.stderr, flush=True)
+
     def discover(self) -> list[ControlManifest]:
         manifests = discover_controls(
             styles_root=self.config.styles_root,
@@ -50,6 +54,7 @@ class Orchestrator:
 
     def run(self) -> dict[str, Any]:
         manifests = self.discover()
+        self._log(f"[uikit-testgen] discovered {len(manifests)} control(s)")
         progress = self._load_progress()
         progress.update(
             {
@@ -66,6 +71,7 @@ class Orchestrator:
         for manifest in manifests:
             progress["current_control"] = manifest.name
             self._save_progress(progress)
+            self._log(f"[uikit-testgen] processing {manifest.name}")
             self._process_control(manifest, progress)
 
         progress["status"] = "completed"
@@ -85,6 +91,7 @@ class Orchestrator:
                 continue
             progress["current_control"] = manifest.name
             self._save_progress(progress)
+            self._log(f"[uikit-testgen] resuming {manifest.name}")
             self._process_control(manifest, progress)
         progress["status"] = "completed"
         progress["current_control"] = None
@@ -100,6 +107,7 @@ class Orchestrator:
         for manifest in manifests:
             progress["current_control"] = manifest.name
             self._save_progress(progress)
+            self._log(f"[uikit-testgen] rechecking {manifest.name}")
             self._process_control(manifest, progress, force_verify=True)
         progress["status"] = "completed"
         progress["current_control"] = None
@@ -112,6 +120,10 @@ class Orchestrator:
         progress: dict[str, Any],
         force_verify: bool = False,
     ) -> None:
+        self._log(
+            f"[uikit-testgen] {manifest.name}: start"
+            + (" (force-verify)" if force_verify else "")
+        )
         control_dir = self.config.artifacts_dir / "controls" / manifest.name
         control_dir.mkdir(parents=True, exist_ok=True)
         report_path = control_dir / "result.json"
@@ -145,12 +157,14 @@ class Orchestrator:
             and control_progress.fingerprint == progress["controls"][manifest.name].get("fingerprint")
             and force_verify
         ):
+            self._log(f"[uikit-testgen] {manifest.name}: verify existing tests")
             verify_result = self._verify_existing_tests(manifest, build_log_path, test_log_path)
             self._write_result(report_path, verify_result)
             self._set_control_status(progress, manifest.name, verify_result.status, "recheck")
             return
 
         if previous_result and force_verify:
+            self._log(f"[uikit-testgen] {manifest.name}: force verify previous result")
             verify_result = self._verify_existing_tests(manifest, build_log_path, test_log_path)
             if verify_result.status == "verified":
                 self._write_result(report_path, verify_result)
@@ -163,14 +177,18 @@ class Orchestrator:
             research_prompt_path=research_prompt_path,
             research_output_path=research_output_path,
         )
+        self._log(f"[uikit-testgen] {manifest.name}: research complete")
         baseline = self._run_baseline_verification(
             manifest,
             research_summary,
             baseline_build_log_path,
             baseline_test_log_path,
         )
+        if baseline.get("attempted"):
+            self._log(f"[uikit-testgen] {manifest.name}: baseline verification complete")
         prompt = self._build_generation_prompt(manifest, report_path, research_summary)
         prompt_path.write_text(prompt, encoding="utf-8")
+        self._log(f"[uikit-testgen] {manifest.name}: generation")
         qwen_result = self._invoke_generation(manifest.name, prompt, qwen_output_path)
         control_progress.session_id = qwen_result.session_id or control_progress.session_id
         progress["controls"][manifest.name] = control_progress.to_dict()
@@ -186,6 +204,7 @@ class Orchestrator:
         )
         early_quality_issue = self._evaluate_generated_test_quality(initial_result, manifest)
         if early_quality_issue:
+            self._log(f"[uikit-testgen] {manifest.name}: rejected by quality guardrail before build")
             result = self._load_or_fallback_result(
                 report_path,
                 manifest.name,
@@ -220,6 +239,7 @@ class Orchestrator:
             self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
             return
         if self._resolve_generation_outcome(initial_result) == "blocked_runtime_gap":
+            self._log(f"[uikit-testgen] {manifest.name}: manual review required before build")
             initial_result.status = "manual_review"
             self._apply_execution_outcome(
                 initial_result,
@@ -244,10 +264,12 @@ class Orchestrator:
             research_summary,
         )
         if should_attempt_initial_verification:
+            self._log(f"[uikit-testgen] {manifest.name}: build")
             if self.config.build_after_each_control:
                 build_attempted = True
                 build_ok = self._run_builds(build_log_path)
             if build_ok and self.config.test_after_each_control:
+                self._log(f"[uikit-testgen] {manifest.name}: test")
                 test_attempted = True
                 test_ok = self._run_tests(manifest, test_log_path)
 
@@ -296,10 +318,12 @@ class Orchestrator:
             result.status = "verified"
             self._write_result(report_path, result)
             self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
+            self._log(f"[uikit-testgen] {manifest.name}: verified")
             return
 
         result = None
         for attempt in range(1, self.config.max_repair_attempts + 1):
+            self._log(f"[uikit-testgen] {manifest.name}: repair attempt {attempt}/{self.config.max_repair_attempts}")
             progress["controls"][manifest.name]["attempt"] = attempt
             progress["controls"][manifest.name]["status"] = "repairing"
             progress["controls"][manifest.name]["updated_at"] = utc_now_iso()
@@ -331,6 +355,7 @@ class Orchestrator:
             )
             early_quality_issue = self._evaluate_generated_test_quality(attempt_result, manifest)
             if early_quality_issue:
+                self._log(f"[uikit-testgen] {manifest.name}: repair output rejected by quality guardrail")
                 result = self._load_or_fallback_result(
                     report_path,
                     manifest.name,
@@ -365,6 +390,7 @@ class Orchestrator:
                 self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                 return
             if self._resolve_generation_outcome(attempt_result) == "blocked_runtime_gap":
+                self._log(f"[uikit-testgen] {manifest.name}: repair concluded manual review is required")
                 attempt_result.status = "manual_review"
                 self._apply_execution_outcome(
                     attempt_result,
@@ -381,11 +407,15 @@ class Orchestrator:
                 return
 
             if not self._should_attempt_verification(attempt_result, research_summary):
+                self._log(f"[uikit-testgen] {manifest.name}: repair produced no verifiable outcome, continuing")
                 continue
 
+            self._log(f"[uikit-testgen] {manifest.name}: build")
             build_attempted = True
             build_ok = self._run_builds(build_log_path)
             test_attempted = build_ok and self.config.test_after_each_control
+            if test_attempted:
+                self._log(f"[uikit-testgen] {manifest.name}: test")
             test_ok = build_ok and self._run_tests(manifest, test_log_path)
             if build_ok and test_ok:
                 result = self._load_or_fallback_result(
@@ -432,6 +462,7 @@ class Orchestrator:
                 result.status = "verified"
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
+                self._log(f"[uikit-testgen] {manifest.name}: verified after repair")
                 return
 
         result = self._load_or_fallback_result(
@@ -457,6 +488,7 @@ class Orchestrator:
         result.notes.append("Automatic repair attempts exhausted.")
         self._write_result(report_path, result)
         self._set_control_status(progress, manifest.name, "manual_review", "failed", control_progress.session_id)
+        self._log(f"[uikit-testgen] {manifest.name}: manual_review after repair exhaustion")
 
     def _invoke_generation(
         self,
