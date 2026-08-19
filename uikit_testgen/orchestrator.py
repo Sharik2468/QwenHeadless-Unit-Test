@@ -185,7 +185,11 @@ class Orchestrator:
             baseline_test_log_path,
         )
         if baseline.get("attempted"):
-            self._log(f"[uikit-testgen] {manifest.name}: baseline verification complete")
+            self._log(
+                f"[uikit-testgen] {manifest.name}: baseline verification complete "
+                f"(build={'ok' if baseline['build']['passed'] else 'failed'}, "
+                f"test={'ok' if baseline['test_run']['passed'] else 'failed' if baseline['test_run']['attempted'] else 'skipped'})"
+            )
         prompt = self._build_generation_prompt(manifest, report_path, research_summary)
         prompt_path.write_text(prompt, encoding="utf-8")
         self._log(f"[uikit-testgen] {manifest.name}: generation")
@@ -268,10 +272,12 @@ class Orchestrator:
             if self.config.build_after_each_control:
                 build_attempted = True
                 build_ok = self._run_builds(build_log_path)
+                self._log(f"[uikit-testgen] {manifest.name}: build {'ok' if build_ok else 'failed'}")
             if build_ok and self.config.test_after_each_control:
                 self._log(f"[uikit-testgen] {manifest.name}: test")
                 test_attempted = True
                 test_ok = self._run_tests(manifest, test_log_path)
+                self._log(f"[uikit-testgen] {manifest.name}: test {'ok' if test_ok else 'failed'}")
 
         if should_attempt_initial_verification and build_ok and test_ok:
             result = self._load_or_fallback_result(
@@ -413,10 +419,13 @@ class Orchestrator:
             self._log(f"[uikit-testgen] {manifest.name}: build")
             build_attempted = True
             build_ok = self._run_builds(build_log_path)
+            self._log(f"[uikit-testgen] {manifest.name}: build {'ok' if build_ok else 'failed'}")
             test_attempted = build_ok and self.config.test_after_each_control
             if test_attempted:
                 self._log(f"[uikit-testgen] {manifest.name}: test")
             test_ok = build_ok and self._run_tests(manifest, test_log_path)
+            if test_attempted:
+                self._log(f"[uikit-testgen] {manifest.name}: test {'ok' if test_ok else 'failed'}")
             if build_ok and test_ok:
                 result = self._load_or_fallback_result(
                     report_path,
@@ -500,7 +509,8 @@ class Orchestrator:
         wall_time: str | None = None,
         tool_calls: int | None = None,
     ) -> QwenRunResult:
-        return run_qwen(
+        self._log(f"[uikit-testgen] {control_name}: qwen start -> {output_path.name}")
+        result = run_qwen(
             qwen_bin=self.config.qwen_bin,
             prompt=prompt,
             repo_root=self.config.repo_root,
@@ -513,6 +523,10 @@ class Orchestrator:
             resume_session_id=resume_session_id,
             include_directories=self._extra_include_directories(),
         )
+        self._log(
+            f"[uikit-testgen] {control_name}: qwen finished (rc={result.returncode}, session={result.session_id or 'n/a'})"
+        )
+        return result
 
     def _build_generation_prompt(
         self,
