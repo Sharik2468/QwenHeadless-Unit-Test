@@ -526,6 +526,12 @@ class Orchestrator:
         self._log(
             f"[uikit-testgen] {control_name}: qwen finished (rc={result.returncode}, session={result.session_id or 'n/a'})"
         )
+        if result.returncode != 0:
+            error_summary = self._extract_qwen_error_summary(result.stdout)
+            if error_summary:
+                self._log(f"[uikit-testgen] {control_name}: qwen error -> {error_summary}")
+            stderr_path = output_path.with_suffix(".stderr.txt")
+            self._log(f"[uikit-testgen] {control_name}: qwen stderr -> {stderr_path}")
         return result
 
     def _build_generation_prompt(
@@ -1032,6 +1038,27 @@ Test log excerpt:
         normalized["existing_test_coverage"] = normalized_coverage
         normalized["next_action"] = self._research_next_action(normalized)
         return normalized
+
+    def _extract_qwen_error_summary(self, stdout: str) -> str | None:
+        stripped = stdout.strip()
+        if not stripped:
+            return None
+        try:
+            payload = json.loads(stripped.lstrip("\ufeff"))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return None
+        error_type = str(error.get("type", "QwenError")).strip() or "QwenError"
+        message = str(error.get("message", "")).strip()
+        code = error.get("code")
+        suffix = f" (code={code})" if code is not None else ""
+        if message:
+            return f"{error_type}{suffix}: {message}"
+        return f"{error_type}{suffix}"
 
     def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
         return bool(manifest.custom_code_files)

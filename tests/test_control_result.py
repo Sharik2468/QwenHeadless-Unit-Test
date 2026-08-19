@@ -438,6 +438,38 @@ class ControlResultParsingTests(unittest.TestCase):
             self.assertEqual(result.build["failure_origin"], "pre_existing_build_failure")
             self.assertEqual(result.test_run["failure_origin"], "pre_existing_test_failure")
 
+    def test_extract_qwen_error_summary_reads_error_object(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            unit_project = root / "tests/Unit/Unit.csproj"
+            headless_project = root / "tests/Headless/Headless.csproj"
+            styles_root = root / "styles"
+            unit_project.parent.mkdir(parents=True)
+            headless_project.parent.mkdir(parents=True)
+            styles_root.mkdir(parents=True)
+            unit_project.write_text("<Project />", encoding="utf-8")
+            headless_project.write_text("<Project />", encoding="utf-8")
+
+            orchestrator = Orchestrator(
+                RunConfig(
+                    repo_root=root,
+                    unit_tests_project=unit_project,
+                    headless_tests_project=headless_project,
+                    styles_root=styles_root,
+                    custom_controls_root=None,
+                    artifacts_dir=root / "artifacts",
+                )
+            )
+
+            summary = orchestrator._extract_qwen_error_summary(
+                '{"error":{"type":"FatalTurnLimitedError","message":"Reached max session turns","code":53}}'
+            )
+
+            self.assertEqual(
+                summary,
+                "FatalTurnLimitedError (code=53): Reached max session turns",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
