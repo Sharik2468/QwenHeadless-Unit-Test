@@ -92,6 +92,23 @@ class DiscoveryTests(unittest.TestCase):
 
             self.assertEqual([manifest.name for manifest in manifests], ["CheckBox"])
 
+    def test_discovery_can_skip_first_controls_before_max_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            styles_root = root / "Controls"
+            for control_name in ("Button", "CheckBox", "Counter", "DropDown"):
+                control_dir = styles_root / control_name
+                control_dir.mkdir(parents=True)
+                (control_dir / f"{control_name}Theme.axaml").write_text("<Styles />", encoding="utf-8")
+
+            manifests = discover_controls(
+                styles_root,
+                skip_controls=1,
+                max_controls=2,
+            )
+
+            self.assertEqual([manifest.name for manifest in manifests], ["CheckBox", "Counter"])
+
 
 if __name__ == "__main__":
     unittest.main()

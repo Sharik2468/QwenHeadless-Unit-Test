@@ -156,6 +156,7 @@ class RunConfig:
     model: str = "qwen3-coder-plus"
     include_control_pattern: str = "*"
     exclude_control_patterns: list[str] = field(default_factory=list)
+    skip_controls: int = 0
     max_controls: int = -1
     max_repair_attempts: int = 3
     approval_mode: str = "yolo"
