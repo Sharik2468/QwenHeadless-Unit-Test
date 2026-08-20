@@ -95,6 +95,8 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             self.assertIn("Research next_action", prompt)
             self.assertIn("Do NOT invent alternative field names such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`", prompt)
             self.assertIn("`notes` MUST always be a JSON array of strings", prompt)
+            self.assertIn("Do NOT run `dotnet build` or `dotnet test` yourself in this phase", prompt)
+            self.assertIn("Do NOT write memory files, scratch summaries, or any other side-car artifacts", prompt)
             self.assertIn("Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail`", prompt)
             self.assertIn("compare them against the current control/theme/resource files", prompt)
 
@@ -177,6 +179,8 @@ class UIKitOrchestratorContextTests(unittest.TestCase):
             self.assertIn("use ONLY the canonical fields expected by the orchestrator", prompt)
             self.assertIn("Do NOT emit legacy/free-form fields such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`", prompt)
             self.assertIn("`notes` must remain a JSON array of strings", prompt)
+            self.assertIn("Do NOT run `dotnet build` or `dotnet test` yourself in this repair phase", prompt)
+            self.assertIn("Do NOT write memory files, scratch summaries, or any side-car artifacts", prompt)
             self.assertIn("Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail`", prompt)
 
     def test_extra_include_directories_collects_external_reference_roots(self) -> None:

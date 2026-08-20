@@ -612,7 +612,7 @@ Hard constraints:
    - state changes (default/hover/pressed/disabled) where relevant
    - size, spacing, thickness, corner radius, fonts, colors where runtime verification is feasible
    - custom control logic for repository-owned controls only
-7. After writing tests, build and run relevant tests. If they fail, fix the tests if possible.
+7. Do NOT run `dotnet build` or `dotnet test` yourself in this phase. The Python orchestrator will run build/test after you finish writing files.
 8. Write a JSON report file to the requested report path.
 9. Invalid tests must NOT be generated. Specifically, do not generate tests that only compare token names, ResourceKey strings, or other static constants without exercising a real control instance or runtime resource application.
 10. If meaningful runtime verification is not possible for a token or style binding, do not replace it with a weak string-based test. Record the gap in unresolved_issues and stop.
@@ -621,6 +621,7 @@ Hard constraints:
 13. The report file MUST be valid JSON using only the canonical fields listed below. Do NOT invent alternative field names such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
 14. `notes` MUST always be a JSON array of strings. `created_tests` and `updated_tests` MUST always be JSON arrays of strings, even when empty.
 15. Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
+16. Do NOT write memory files, scratch summaries, or any other side-car artifacts outside the target test files and the required report JSON.
 
 Target control:
 {manifest_json}
@@ -665,10 +666,8 @@ Tasks:
    - update_tests -> update existing tests
    - preserve_tests -> inspect and preserve only if still valid
    - manual_review -> do not invent weak tests; explain why manual review is needed
-6. Build the affected test projects.
-7. Run relevant tests for this control.
-8. If build/tests fail, fix up to the limits of this run.
-9. Write the final report JSON to:
+6. Do NOT run build/test yourself; the orchestrator will do that after this phase completes.
+7. Write the final report JSON to:
 {report_path}
 
 The final report JSON must include:
@@ -741,6 +740,8 @@ Only keep tests unchanged when they still match the current control behavior aft
 When you rewrite the report JSON, use ONLY the canonical fields expected by the orchestrator. Do NOT emit legacy/free-form fields such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
 `notes` must remain a JSON array of strings; do not collapse it into a single string.
 Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
+Do NOT run `dotnet build` or `dotnet test` yourself in this repair phase. The orchestrator will perform verification after you finish editing files and writing the report.
+Do NOT write memory files, scratch summaries, or any side-car artifacts outside the relevant test files and the required report JSON.
 Re-inspect these reference files/directories before guessing APIs or helper patterns:
 {reference_section}
 
