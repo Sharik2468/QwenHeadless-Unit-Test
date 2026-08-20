@@ -290,9 +290,11 @@ class ControlResultParsingTests(unittest.TestCase):
             )
 
             generation_count = {"value": 0}
+            invoked_turn_limits: list[int | None] = []
 
             def fake_invoke_generation(*args, **kwargs):
                 generation_count["value"] += 1
+                invoked_turn_limits.append(kwargs.get("session_turns"))
                 if generation_count["value"] == 1:
                     return initial_result
 
@@ -330,6 +332,7 @@ class ControlResultParsingTests(unittest.TestCase):
                 orchestrator._process_control(manifest, {"controls": {}})
 
             self.assertEqual(generation_count["value"], 2)
+            self.assertEqual(invoked_turn_limits, [None, orchestrator.config.max_session_turns])
             mocked_builds.assert_called_once()
             mocked_tests.assert_called_once()
 

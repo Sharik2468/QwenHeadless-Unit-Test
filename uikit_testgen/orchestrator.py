@@ -347,7 +347,7 @@ class Orchestrator:
                 manifest.name,
                 repair_prompt,
                 qwen_output_path,
-                session_turns=15,
+                session_turns=self.config.max_session_turns,
             )
             control_progress.session_id = qwen_result.session_id or control_progress.session_id
             progress["controls"][manifest.name] = control_progress.to_dict()
@@ -1113,7 +1113,7 @@ Test log excerpt:
             manifest.name,
             prompt,
             research_output_path,
-            session_turns=12,
+            session_turns=self.config.max_session_turns,
         )
         if not research_summary_path.exists():
             fallback = {
