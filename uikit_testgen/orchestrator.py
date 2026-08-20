@@ -192,6 +192,37 @@ class Orchestrator:
                 f"(build={'ok' if baseline['build']['passed'] else 'failed'}, "
                 f"test={'ok' if baseline['test_run']['passed'] else 'failed' if baseline['test_run']['attempted'] else 'skipped'})"
             )
+        if self._research_next_action(research_summary) == "manual_review":
+            self._log(f"[uikit-testgen] {manifest.name}: research requested manual_review")
+            result = ControlResult(
+                control=manifest.name,
+                status="manual_review",
+                generation_outcome="blocked_runtime_gap",
+                unresolved_issues=[
+                    {
+                        "type": "research_requested_manual_review",
+                        "reason": str(research_summary.get("summary", "")).strip()
+                        or "Research phase concluded that this control requires manual review before generation.",
+                        "severity": "high",
+                    }
+                ],
+                notes=[
+                    "Research selected next_action=manual_review, so generation and repair were skipped."
+                ],
+            )
+            self._apply_execution_outcome(
+                result,
+                build_ok=False,
+                test_ok=False,
+                build_log_path=build_log_path,
+                test_log_path=test_log_path,
+                build_attempted=False,
+                test_attempted=False,
+                baseline=baseline,
+            )
+            self._write_result(report_path, result)
+            self._set_control_status(progress, manifest.name, "manual_review", "research_manual_review", control_progress.session_id)
+            return
         prompt = self._build_generation_prompt(manifest, report_path, research_summary)
         prompt_path.write_text(prompt, encoding="utf-8")
         self._log(f"[uikit-testgen] {manifest.name}: generation")

@@ -342,6 +342,77 @@ class ControlResultParsingTests(unittest.TestCase):
             self.assertTrue(result_payload["build"]["attempted"])
             self.assertTrue(result_payload["test_run"]["attempted"])
 
+    def test_process_control_stops_after_research_manual_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            repo_root.mkdir()
+            unit_project = repo_root / "tests/Unit/Unit.csproj"
+            headless_project = repo_root / "tests/Headless/Headless.csproj"
+            styles_root = repo_root / "styles"
+            style_dir = styles_root / SAMPLE_CONTROL
+            related_file = style_dir / f"{SAMPLE_CONTROL}Theme.axaml"
+            artifacts_dir = root / "artifacts"
+
+            unit_project.parent.mkdir(parents=True)
+            headless_project.parent.mkdir(parents=True)
+            style_dir.mkdir(parents=True)
+            unit_project.write_text("<Project />", encoding="utf-8")
+            headless_project.write_text("<Project />", encoding="utf-8")
+            related_file.write_text("<Styles />", encoding="utf-8")
+
+            orchestrator = Orchestrator(
+                RunConfig(
+                    repo_root=repo_root,
+                    unit_tests_project=unit_project,
+                    headless_tests_project=headless_project,
+                    styles_root=styles_root,
+                    custom_controls_root=None,
+                    artifacts_dir=artifacts_dir,
+                )
+            )
+            manifest = ControlManifest(
+                name=SAMPLE_CONTROL,
+                kind="styled_control",
+                style_dir=style_dir,
+                relative_dir=SAMPLE_CONTROL,
+                group_name=SAMPLE_CONTROL,
+                related_files=[related_file],
+            )
+
+            with (
+                patch.object(
+                    orchestrator,
+                    "_ensure_research_summary",
+                    return_value={
+                        "summary": "Research determined this control should be handled manually.",
+                        "existing_test_files": [],
+                        "existing_test_coverage": {"status": "none"},
+                        "next_action": "manual_review",
+                    },
+                ),
+                patch.object(orchestrator, "_invoke_generation") as mocked_generation,
+                patch.object(orchestrator, "_run_builds") as mocked_builds,
+                patch.object(orchestrator, "_run_tests") as mocked_tests,
+            ):
+                orchestrator._process_control(manifest, {"controls": {}})
+
+            mocked_generation.assert_not_called()
+            mocked_builds.assert_not_called()
+            mocked_tests.assert_not_called()
+
+            result_payload = json.loads(
+                (artifacts_dir / "controls" / SAMPLE_CONTROL / "result.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(result_payload["status"], "manual_review")
+            self.assertEqual(result_payload["generation_outcome"], "blocked_runtime_gap")
+            self.assertFalse(result_payload["build"]["attempted"])
+            self.assertFalse(result_payload["test_run"]["attempted"])
+            self.assertIn(
+                "Research selected next_action=manual_review, so generation and repair were skipped.",
+                result_payload["notes"],
+            )
+
     def test_preserve_existing_tests_does_not_depend_on_python_coverage_gating(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
