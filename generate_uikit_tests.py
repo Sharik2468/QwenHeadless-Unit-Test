@@ -42,6 +42,7 @@ def add_shared_arguments(parser: argparse.ArgumentParser, include_optional_roots
     parser.add_argument("--include-control-pattern", default="*")
     parser.add_argument("--exclude-control-pattern", action="append", default=[])
     parser.add_argument("--skip-controls", type=int, default=0)
+    parser.add_argument("--start-from-control")
     parser.add_argument("--max-controls", type=int, default=-1)
     parser.add_argument("--max-repair-attempts", type=int, default=3)
     parser.add_argument("--approval-mode", default="yolo")
@@ -96,6 +97,7 @@ def build_config(args: argparse.Namespace) -> RunConfig:
         include_control_pattern=args.include_control_pattern,
         exclude_control_patterns=list(args.exclude_control_pattern),
         skip_controls=args.skip_controls,
+        start_from_control=args.start_from_control,
         max_controls=args.max_controls,
         max_repair_attempts=args.max_repair_attempts,
         approval_mode=args.approval_mode,

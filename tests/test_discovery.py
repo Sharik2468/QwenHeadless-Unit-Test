@@ -109,6 +109,23 @@ class DiscoveryTests(unittest.TestCase):
 
             self.assertEqual([manifest.name for manifest in manifests], ["CheckBox", "Counter"])
 
+    def test_discovery_can_start_from_named_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            styles_root = root / "Controls"
+            for control_name in ("Button", "CheckBox", "Counter", "DropDown"):
+                control_dir = styles_root / control_name
+                control_dir.mkdir(parents=True)
+                (control_dir / f"{control_name}Theme.axaml").write_text("<Styles />", encoding="utf-8")
+
+            manifests = discover_controls(
+                styles_root,
+                start_from_control="Counter",
+                max_controls=2,
+            )
+
+            self.assertEqual([manifest.name for manifest in manifests], ["Counter", "DropDown"])
+
 
 if __name__ == "__main__":
     unittest.main()

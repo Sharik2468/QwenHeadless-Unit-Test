@@ -48,6 +48,7 @@ class Orchestrator:
             include_pattern=self.config.include_control_pattern,
             exclude_patterns=self.config.exclude_control_patterns,
             skip_controls=self.config.skip_controls,
+            start_from_control=self.config.start_from_control,
             max_controls=self.config.max_controls,
         )
         self.manifest_path.write_text(manifest_to_json(manifests), encoding="utf-8")

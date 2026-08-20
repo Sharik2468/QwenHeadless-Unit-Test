@@ -107,6 +107,38 @@ class CliConfigTests(unittest.TestCase):
 
             self.assertEqual(config.skip_controls, 3)
 
+    def test_build_config_preserves_start_from_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            unit = repo_root / "Avalonia/NSCore.UIKit.Controls.UnitTests/NSCore.UIKit.Controls.UnitTests.csproj"
+            headless = (
+                repo_root
+                / "Avalonia/NSCore.UIKit.Headless.XUnit.UnitTests/NSCore.UIKit.Headless.XUnit.UnitTests.csproj"
+            )
+            styles = repo_root / "Avalonia/NSCore.Avalonia.Theme/Controls"
+            unit.parent.mkdir(parents=True)
+            headless.parent.mkdir(parents=True)
+            styles.mkdir(parents=True)
+            unit.write_text("<Project />", encoding="utf-8")
+            headless.write_text("<Project />", encoding="utf-8")
+
+            parser = build_parser()
+            args = parser.parse_args(
+                [
+                    "run",
+                    "--repo-root",
+                    str(repo_root),
+                    "--artifacts-dir",
+                    str(repo_root / ".artifacts"),
+                    "--start-from-control",
+                    "Counter",
+                ]
+            )
+
+            config = build_config(args)
+
+            self.assertEqual(config.start_from_control, "Counter")
+
 
 if __name__ == "__main__":
     unittest.main()

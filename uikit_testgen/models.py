@@ -157,6 +157,7 @@ class RunConfig:
     include_control_pattern: str = "*"
     exclude_control_patterns: list[str] = field(default_factory=list)
     skip_controls: int = 0
+    start_from_control: str | None = None
     max_controls: int = -1
     max_repair_attempts: int = 3
     approval_mode: str = "yolo"
