@@ -65,9 +65,13 @@ def discover_controls(
     custom_controls_root: Path | None = None,
     include_pattern: str = "*",
     exclude_patterns: list[str] | None = None,
+    skip_controls: int = 0,
+    start_from_control: str | None = None,
     max_controls: int = -1,
 ) -> list[ControlManifest]:
     exclude_patterns = exclude_patterns or []
+    skip_controls = max(skip_controls, 0)
+    start_from_control = start_from_control.strip().lower() if start_from_control else None
     grouped: dict[Path, list[Path]] = defaultdict(list)
 
     for path in styles_root.rglob("*"):
@@ -76,6 +80,8 @@ def discover_controls(
         grouped[path.parent].append(path)
 
     manifests: list[ControlManifest] = []
+    matched_controls = 0
+    start_collecting = start_from_control is None
     for directory, files in sorted(grouped.items()):
         if directory == styles_root:
             continue
@@ -86,6 +92,14 @@ def discover_controls(
             continue
         if any(fnmatch.fnmatch(control_name, pattern) for pattern in exclude_patterns):
             continue
+        if not start_collecting:
+            if control_name.lower() != start_from_control:
+                continue
+            start_collecting = True
+        if matched_controls < skip_controls:
+            matched_controls += 1
+            continue
+        matched_controls += 1
 
         relative_parts = directory.relative_to(styles_root).parts
         relative_dir = "/".join(relative_parts)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,18 @@ from testgen_shared.test_quality import (
 from .discovery import build_fingerprint, discover_controls, manifest_to_json
 from .models import ControlManifest, ControlProgress, ControlResult, RunConfig, utc_now_iso
 
+MISSING_REPORTED_TEST_FILES_REASON = (
+    "No created or updated test files were reported, so the run cannot be considered verified."
+)
+RESEARCH_COVERAGE_STATUSES = {"none", "partial", "adequate", "stale", "unknown"}
+GENERATION_OUTCOMES = {
+    "generated_new_tests",
+    "updated_existing_tests",
+    "preserved_existing_tests",
+    "blocked_runtime_gap",
+    "generation_failed",
+}
+
 
 class Orchestrator:
     def __init__(self, config: RunConfig) -> None:
@@ -25,12 +38,17 @@ class Orchestrator:
         self.progress_path = self.config.artifacts_dir / "progress.json"
         self.manifest_path = self.config.artifacts_dir / "controls_manifest.json"
 
+    def _log(self, message: str) -> None:
+        print(message, file=sys.stderr, flush=True)
+
     def discover(self) -> list[ControlManifest]:
         manifests = discover_controls(
             styles_root=self.config.styles_root,
             custom_controls_root=self.config.custom_controls_root,
             include_pattern=self.config.include_control_pattern,
             exclude_patterns=self.config.exclude_control_patterns,
+            skip_controls=self.config.skip_controls,
+            start_from_control=self.config.start_from_control,
             max_controls=self.config.max_controls,
         )
         self.manifest_path.write_text(manifest_to_json(manifests), encoding="utf-8")
@@ -38,6 +56,7 @@ class Orchestrator:
 
     def run(self) -> dict[str, Any]:
         manifests = self.discover()
+        self._log(f"[uikit-testgen] discovered {len(manifests)} control(s)")
         progress = self._load_progress()
         progress.update(
             {
@@ -54,6 +73,7 @@ class Orchestrator:
         for manifest in manifests:
             progress["current_control"] = manifest.name
             self._save_progress(progress)
+            self._log(f"[uikit-testgen] processing {manifest.name}")
             self._process_control(manifest, progress)
 
         progress["status"] = "completed"
@@ -73,6 +93,7 @@ class Orchestrator:
                 continue
             progress["current_control"] = manifest.name
             self._save_progress(progress)
+            self._log(f"[uikit-testgen] resuming {manifest.name}")
             self._process_control(manifest, progress)
         progress["status"] = "completed"
         progress["current_control"] = None
@@ -88,6 +109,7 @@ class Orchestrator:
         for manifest in manifests:
             progress["current_control"] = manifest.name
             self._save_progress(progress)
+            self._log(f"[uikit-testgen] rechecking {manifest.name}")
             self._process_control(manifest, progress, force_verify=True)
         progress["status"] = "completed"
         progress["current_control"] = None
@@ -100,6 +122,10 @@ class Orchestrator:
         progress: dict[str, Any],
         force_verify: bool = False,
     ) -> None:
+        self._log(
+            f"[uikit-testgen] {manifest.name}: start"
+            + (" (force-verify)" if force_verify else "")
+        )
         control_dir = self.config.artifacts_dir / "controls" / manifest.name
         control_dir.mkdir(parents=True, exist_ok=True)
         report_path = control_dir / "result.json"
@@ -110,6 +136,8 @@ class Orchestrator:
         qwen_output_path = control_dir / "qwen-output.json"
         build_log_path = control_dir / "build.log"
         test_log_path = control_dir / "test.log"
+        baseline_build_log_path = control_dir / "baseline-build.log"
+        baseline_test_log_path = control_dir / "baseline-test.log"
         manifest_path = control_dir / "control_manifest.json"
         manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -131,12 +159,14 @@ class Orchestrator:
             and control_progress.fingerprint == progress["controls"][manifest.name].get("fingerprint")
             and force_verify
         ):
+            self._log(f"[uikit-testgen] {manifest.name}: verify existing tests")
             verify_result = self._verify_existing_tests(manifest, build_log_path, test_log_path)
             self._write_result(report_path, verify_result)
             self._set_control_status(progress, manifest.name, verify_result.status, "recheck")
             return
 
         if previous_result and force_verify:
+            self._log(f"[uikit-testgen] {manifest.name}: force verify previous result")
             verify_result = self._verify_existing_tests(manifest, build_log_path, test_log_path)
             if verify_result.status == "verified":
                 self._write_result(report_path, verify_result)
@@ -149,25 +179,69 @@ class Orchestrator:
             research_prompt_path=research_prompt_path,
             research_output_path=research_output_path,
         )
+        self._log(f"[uikit-testgen] {manifest.name}: research complete")
+        baseline = self._run_baseline_verification(
+            manifest,
+            research_summary,
+            baseline_build_log_path,
+            baseline_test_log_path,
+        )
+        if baseline.get("attempted"):
+            self._log(
+                f"[uikit-testgen] {manifest.name}: baseline verification complete "
+                f"(build={'ok' if baseline['build']['passed'] else 'failed'}, "
+                f"test={'ok' if baseline['test_run']['passed'] else 'failed' if baseline['test_run']['attempted'] else 'skipped'})"
+            )
+        if self._research_next_action(research_summary) == "manual_review":
+            self._log(f"[uikit-testgen] {manifest.name}: research requested manual_review")
+            result = ControlResult(
+                control=manifest.name,
+                status="manual_review",
+                generation_outcome="blocked_runtime_gap",
+                unresolved_issues=[
+                    {
+                        "type": "research_requested_manual_review",
+                        "reason": str(research_summary.get("summary", "")).strip()
+                        or "Research phase concluded that this control requires manual review before generation.",
+                        "severity": "high",
+                    }
+                ],
+                notes=[
+                    "Research selected next_action=manual_review, so generation and repair were skipped."
+                ],
+            )
+            self._apply_execution_outcome(
+                result,
+                build_ok=False,
+                test_ok=False,
+                build_log_path=build_log_path,
+                test_log_path=test_log_path,
+                build_attempted=False,
+                test_attempted=False,
+                baseline=baseline,
+            )
+            self._write_result(report_path, result)
+            self._set_control_status(progress, manifest.name, "manual_review", "research_manual_review", control_progress.session_id)
+            return
         prompt = self._build_generation_prompt(manifest, report_path, research_summary)
         prompt_path.write_text(prompt, encoding="utf-8")
+        self._log(f"[uikit-testgen] {manifest.name}: generation")
         qwen_result = self._invoke_generation(manifest.name, prompt, qwen_output_path)
         control_progress.session_id = qwen_result.session_id or control_progress.session_id
         progress["controls"][manifest.name] = control_progress.to_dict()
         self._save_progress(progress)
-        early_quality_issue = self._evaluate_generated_test_quality(
-            self._load_or_fallback_result(
-                report_path,
-                manifest.name,
-                build_log_path,
-                test_log_path,
-                qwen_result,
-                build_ok=False,
-                test_ok=False,
-            ),
-            manifest,
+        initial_result = self._load_or_fallback_result(
+            report_path,
+            manifest.name,
+            build_log_path,
+            test_log_path,
+            qwen_result,
+            build_ok=False,
+            test_ok=False,
         )
+        early_quality_issue = self._evaluate_generated_test_quality(initial_result, manifest)
         if early_quality_issue:
+            self._log(f"[uikit-testgen] {manifest.name}: rejected by quality guardrail before build")
             result = self._load_or_fallback_result(
                 report_path,
                 manifest.name,
@@ -196,23 +270,49 @@ class Orchestrator:
                 test_log_path=test_log_path,
                 build_attempted=False,
                 test_attempted=False,
+                baseline=baseline,
             )
             self._write_result(report_path, result)
             self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
+            return
+        if self._resolve_generation_outcome(initial_result) == "blocked_runtime_gap":
+            self._log(f"[uikit-testgen] {manifest.name}: manual review required before build")
+            initial_result.status = "manual_review"
+            self._apply_execution_outcome(
+                initial_result,
+                build_ok=False,
+                test_ok=False,
+                build_log_path=build_log_path,
+                test_log_path=test_log_path,
+                build_attempted=False,
+                test_attempted=False,
+                baseline=baseline,
+            )
+            self._write_result(report_path, initial_result)
+            self._set_control_status(progress, manifest.name, "manual_review", "blocked_runtime_gap", control_progress.session_id)
             return
 
         build_ok = True
         test_ok = True
         build_attempted = False
         test_attempted = False
-        if self.config.build_after_each_control:
-            build_attempted = True
-            build_ok = self._run_builds(build_log_path)
-        if build_ok and self.config.test_after_each_control:
-            test_attempted = True
-            test_ok = self._run_tests(manifest, test_log_path)
+        should_attempt_initial_verification = self._should_attempt_verification(
+            initial_result,
+            research_summary,
+        )
+        if should_attempt_initial_verification:
+            self._log(f"[uikit-testgen] {manifest.name}: build")
+            if self.config.build_after_each_control:
+                build_attempted = True
+                build_ok = self._run_builds(build_log_path)
+                self._log(f"[uikit-testgen] {manifest.name}: build {'ok' if build_ok else 'failed'}")
+            if build_ok and self.config.test_after_each_control:
+                self._log(f"[uikit-testgen] {manifest.name}: test")
+                test_attempted = True
+                test_ok = self._run_tests(manifest, test_log_path)
+                self._log(f"[uikit-testgen] {manifest.name}: test {'ok' if test_ok else 'failed'}")
 
-        if build_ok and test_ok:
+        if should_attempt_initial_verification and build_ok and test_ok:
             result = self._load_or_fallback_result(
                 report_path,
                 manifest.name,
@@ -230,6 +330,7 @@ class Orchestrator:
                 test_log_path=test_log_path,
                 build_attempted=build_attempted,
                 test_attempted=test_attempted,
+                baseline=baseline,
             )
             quality_issue = self._evaluate_generated_test_quality(result, manifest)
             if quality_issue:
@@ -247,13 +348,21 @@ class Orchestrator:
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                 return
+            if self._resolve_generation_outcome(result) == "preserved_existing_tests":
+                result.generation_outcome = "preserved_existing_tests"
+                result.existing_tests_preserved = True
+                result.notes.append(
+                    "Existing tests were reviewed, preserved, and verified against the current control filter."
+                )
             result.status = "verified"
             self._write_result(report_path, result)
             self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
+            self._log(f"[uikit-testgen] {manifest.name}: verified")
             return
 
         result = None
         for attempt in range(1, self.config.max_repair_attempts + 1):
+            self._log(f"[uikit-testgen] {manifest.name}: repair attempt {attempt}/{self.config.max_repair_attempts}")
             progress["controls"][manifest.name]["attempt"] = attempt
             progress["controls"][manifest.name]["status"] = "repairing"
             progress["controls"][manifest.name]["updated_at"] = utc_now_iso()
@@ -269,24 +378,23 @@ class Orchestrator:
                 manifest.name,
                 repair_prompt,
                 qwen_output_path,
-                session_turns=15,
+                session_turns=self.config.max_session_turns,
             )
             control_progress.session_id = qwen_result.session_id or control_progress.session_id
             progress["controls"][manifest.name] = control_progress.to_dict()
             self._save_progress(progress)
-            early_quality_issue = self._evaluate_generated_test_quality(
-                self._load_or_fallback_result(
-                    report_path,
-                    manifest.name,
-                    build_log_path,
-                    test_log_path,
-                    qwen_result,
-                    build_ok=False,
-                    test_ok=False,
-                ),
-                manifest,
+            attempt_result = self._load_or_fallback_result(
+                report_path,
+                manifest.name,
+                build_log_path,
+                test_log_path,
+                qwen_result,
+                build_ok=False,
+                test_ok=False,
             )
+            early_quality_issue = self._evaluate_generated_test_quality(attempt_result, manifest)
             if early_quality_issue:
+                self._log(f"[uikit-testgen] {manifest.name}: repair output rejected by quality guardrail")
                 result = self._load_or_fallback_result(
                     report_path,
                     manifest.name,
@@ -315,15 +423,42 @@ class Orchestrator:
                     test_log_path=test_log_path,
                     build_attempted=False,
                     test_attempted=False,
+                    baseline=baseline,
                 )
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                 return
+            if self._resolve_generation_outcome(attempt_result) == "blocked_runtime_gap":
+                self._log(f"[uikit-testgen] {manifest.name}: repair concluded manual review is required")
+                attempt_result.status = "manual_review"
+                self._apply_execution_outcome(
+                    attempt_result,
+                    build_ok=False,
+                    test_ok=False,
+                    build_log_path=build_log_path,
+                    test_log_path=test_log_path,
+                    build_attempted=False,
+                    test_attempted=False,
+                    baseline=baseline,
+                )
+                self._write_result(report_path, attempt_result)
+                self._set_control_status(progress, manifest.name, "manual_review", "blocked_runtime_gap", control_progress.session_id)
+                return
 
+            if not self._should_attempt_verification(attempt_result, research_summary):
+                self._log(f"[uikit-testgen] {manifest.name}: repair produced no verifiable outcome, continuing")
+                continue
+
+            self._log(f"[uikit-testgen] {manifest.name}: build")
             build_attempted = True
             build_ok = self._run_builds(build_log_path)
+            self._log(f"[uikit-testgen] {manifest.name}: build {'ok' if build_ok else 'failed'}")
             test_attempted = build_ok and self.config.test_after_each_control
+            if test_attempted:
+                self._log(f"[uikit-testgen] {manifest.name}: test")
             test_ok = build_ok and self._run_tests(manifest, test_log_path)
+            if test_attempted:
+                self._log(f"[uikit-testgen] {manifest.name}: test {'ok' if test_ok else 'failed'}")
             if build_ok and test_ok:
                 result = self._load_or_fallback_result(
                     report_path,
@@ -342,6 +477,7 @@ class Orchestrator:
                     test_log_path=test_log_path,
                     build_attempted=build_attempted,
                     test_attempted=test_attempted,
+                    baseline=baseline,
                 )
                 quality_issue = self._evaluate_generated_test_quality(result, manifest)
                 if quality_issue:
@@ -359,9 +495,16 @@ class Orchestrator:
                     self._write_result(report_path, result)
                     self._set_control_status(progress, manifest.name, "manual_review", "quality_guardrail", control_progress.session_id)
                     return
+                if self._resolve_generation_outcome(result) == "preserved_existing_tests":
+                    result.generation_outcome = "preserved_existing_tests"
+                    result.existing_tests_preserved = True
+                    result.notes.append(
+                        "Existing tests were reviewed, preserved, and verified against the current control filter."
+                    )
                 result.status = "verified"
                 self._write_result(report_path, result)
                 self._set_control_status(progress, manifest.name, "verified", "completed", control_progress.session_id)
+                self._log(f"[uikit-testgen] {manifest.name}: verified after repair")
                 return
 
         result = self._load_or_fallback_result(
@@ -381,11 +524,13 @@ class Orchestrator:
             test_log_path=test_log_path,
             build_attempted=build_attempted,
             test_attempted=test_attempted,
+            baseline=baseline,
         )
         result.status = "manual_review"
         result.notes.append("Automatic repair attempts exhausted.")
         self._write_result(report_path, result)
         self._set_control_status(progress, manifest.name, "manual_review", "failed", control_progress.session_id)
+        self._log(f"[uikit-testgen] {manifest.name}: manual_review after repair exhaustion")
 
     def _invoke_generation(
         self,
@@ -397,7 +542,8 @@ class Orchestrator:
         wall_time: str | None = None,
         tool_calls: int | None = None,
     ) -> QwenRunResult:
-        return run_qwen(
+        self._log(f"[uikit-testgen] {control_name}: qwen start -> {output_path.name}")
+        result = run_qwen(
             qwen_bin=self.config.qwen_bin,
             prompt=prompt,
             repo_root=self.config.repo_root,
@@ -410,6 +556,22 @@ class Orchestrator:
             resume_session_id=resume_session_id,
             include_directories=self._extra_include_directories(),
         )
+        self._log(
+            f"[uikit-testgen] {control_name}: qwen finished (rc={result.returncode}, session={result.session_id or 'n/a'})"
+        )
+        summary = self._extract_qwen_iteration_summary(result)
+        if summary:
+            self._log(f"[uikit-testgen] {control_name}: qwen summary -> {summary}")
+        transport_error = self._extract_qwen_transport_error(result)
+        if transport_error:
+            self._log(f"[uikit-testgen] {control_name}: qwen transport error -> {transport_error}")
+        if result.returncode != 0:
+            error_summary = self._extract_qwen_error_summary(result.stdout)
+            if error_summary:
+                self._log(f"[uikit-testgen] {control_name}: qwen error -> {error_summary}")
+            stderr_path = output_path.with_suffix(".stderr.txt")
+            self._log(f"[uikit-testgen] {control_name}: qwen stderr -> {stderr_path}")
+        return result
 
     def _build_generation_prompt(
         self,
@@ -425,7 +587,20 @@ class Orchestrator:
             else "- None provided."
         )
         manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
-        research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
+        research_summary_json = json.dumps(
+            self._compact_research_summary_for_prompt(research_summary),
+            indent=2,
+            ensure_ascii=False,
+        )
+        coverage_status = self._research_coverage_status(research_summary)
+        next_action = self._research_next_action(research_summary)
+        existing_test_guidance = {
+            "none": "Research found no existing control-specific tests. Initial generation must create at least one meaningful headless runtime test file unless you can prove runtime verification is not feasible; do not leave the control unchanged on the first pass.",
+            "adequate": "Research found adequate existing control-specific tests. You may preserve them only after re-inspecting them against the current control/theme/resource files and only if they still match the current behavior.",
+            "partial": "Research found partial existing control-specific coverage. Do not preserve it unchanged unless you can fully close the listed must_verify scope; prefer updating the existing tests.",
+            "stale": "Research found stale existing control-specific tests. You should update those tests instead of preserving them.",
+            "unknown": "Research could not confidently classify the existing coverage. Re-inspect the existing tests carefully and prefer updating them over preserving them unchanged.",
+        }[coverage_status]
         unit_test_policy = (
             "This control has repository-owned custom code files, so classic unit tests for its custom logic are allowed."
             if self._should_run_unit_tests(manifest)
@@ -447,10 +622,16 @@ Hard constraints:
    - state changes (default/hover/pressed/disabled) where relevant
    - size, spacing, thickness, corner radius, fonts, colors where runtime verification is feasible
    - custom control logic for repository-owned controls only
-7. After writing tests, build and run relevant tests. If they fail, fix the tests if possible.
+7. Do NOT run `dotnet build` or `dotnet test` yourself in this phase. The Python orchestrator will run build/test after you finish writing files.
 8. Write a JSON report file to the requested report path.
 9. Invalid tests must NOT be generated. Specifically, do not generate tests that only compare token names, ResourceKey strings, or other static constants without exercising a real control instance or runtime resource application.
 10. If meaningful runtime verification is not possible for a token or style binding, do not replace it with a weak string-based test. Record the gap in unresolved_issues and stop.
+11. You MUST inspect any existing tests for this control before deciding that no test-file changes are needed. Compare the current control/theme/resource files against existing tests and update those tests if the coverage is stale, incomplete, or no longer matches runtime behavior.
+12. If existing tests already cover the current control and truly do not need edits, set `existing_tests_preserved` to true in the final report and explain in `notes` what you reviewed. Do not set that flag unless you actually inspected the current control files and the existing tests.
+13. The report file MUST be valid JSON using only the canonical fields listed below. Do NOT invent alternative field names such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
+14. `notes` MUST always be a JSON array of strings. `created_tests` and `updated_tests` MUST always be JSON arrays of strings, even when empty.
+15. Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
+16. Do NOT write memory files, scratch summaries, or any other side-car artifacts outside the target test files and the required report JSON.
 
 Target control:
 {manifest_json}
@@ -465,6 +646,12 @@ Projects:
 Unit test policy:
 {unit_test_policy}
 
+Existing test guidance:
+{existing_test_guidance}
+
+Research next_action:
+{next_action}
+
 Reference files and directories to inspect before guessing APIs, control types, namespaces, or test patterns:
 {reference_section}
 
@@ -473,20 +660,24 @@ Research summary from a separate exploration session:
 
 Tasks:
 1. Analyze the target control.
-2. Decide which tests are appropriate:
+2. Inspect any existing control-specific tests in the allowed test projects and compare them against the current control/theme/resource files before deciding whether updates are needed.
+3. Decide which tests are appropriate:
    - headless runtime style/state tests
    - unit tests for custom logic only when the control has repository-owned custom code files
    - skip fake/low-value tests entirely
-3. Use the reference files/directories above before making assumptions about:
+4. Use the reference files/directories above before making assumptions about:
    - control CLR types or namespaces
    - headless helper patterns
    - visual-tree traversal utilities
    - how existing tests access runtime-applied values
-4. Create or update tests in the specified test projects.
-5. Build the affected test projects.
-6. Run relevant tests for this control.
-7. If build/tests fail, fix up to the limits of this run.
-8. Write the final report JSON to:
+5. Create or update tests in the specified test projects when coverage is missing or stale. If existing tests are still correct after inspection, keep them unchanged and mark `existing_tests_preserved: true` in the report.
+5a. Treat the research summary as the default decision for this phase:
+   - create_tests -> create meaningful tests
+   - update_tests -> update existing tests
+   - preserve_tests -> inspect and preserve only if still valid
+   - manual_review -> do not invent weak tests; explain why manual review is needed
+6. Do NOT run build/test yourself; the orchestrator will do that after this phase completes.
+7. Write the final report JSON to:
 {report_path}
 
 The final report JSON must include:
@@ -494,11 +685,30 @@ The final report JSON must include:
 - status
 - created_tests
 - updated_tests
+- generation_outcome (one of: generated_new_tests, updated_existing_tests, preserved_existing_tests, blocked_runtime_gap, generation_failed)
+- existing_tests_preserved (set to true only when you inspected existing tests and intentionally kept them unchanged)
 - checks_added
 - unresolved_issues
 - build
 - test_run
 - notes
+
+Write ONLY these canonical fields in the report JSON. Do NOT add legacy or convenience fields outside this schema.
+
+Canonical report shape example:
+{{
+  "control": "{manifest.name}",
+  "status": "verified|manual_review|partial|fixed",
+  "created_tests": [],
+  "updated_tests": [],
+  "generation_outcome": "generated_new_tests|updated_existing_tests|preserved_existing_tests|blocked_runtime_gap|generation_failed",
+  "existing_tests_preserved": false,
+  "checks_added": {{}},
+  "unresolved_issues": [],
+  "build": {{}},
+  "test_run": {{}},
+  "notes": []
+}}
 
 A generated test is only acceptable if it checks runtime-applied behavior or values on the actual control, its template, or its rendered state.
 Tests that only validate ResourceKey values or typed token constant names are invalid.
@@ -519,13 +729,33 @@ Return a short final summary in plain text after writing the report.
             if reference_paths
             else "- None provided."
         )
-        research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
+        research_summary_json = json.dumps(
+            self._compact_research_summary_for_prompt(research_summary),
+            indent=2,
+            ensure_ascii=False,
+        )
+        coverage_status = self._research_coverage_status(research_summary)
+        existing_test_guidance = {
+            "none": "Research found no existing control-specific tests. This repair pass should create meaningful headless runtime tests instead of preserving the empty state.",
+            "adequate": "Research found adequate existing control-specific tests. Preserve them only if they still match the current control files after re-inspection.",
+            "partial": "Research found partial existing control-specific coverage. Use this repair pass to close the missing coverage instead of preserving the current state unchanged.",
+            "stale": "Research found stale existing control-specific tests. Use this repair pass to update them.",
+            "unknown": "Research could not confidently classify the existing coverage. Re-inspect it carefully and prefer updating tests over preserving them unchanged.",
+        }[coverage_status]
         return f"""Fix the generated tests for control {control_name}.
 
 Only modify tests related to {control_name}. Prefer stable assertions. If some checks are too brittle,
 keep the reliable tests and record unresolved cases in the report file for this control.
 Do NOT degrade into tests that only check ResourceKey values, token names, or TryFindResource-only resource existence.
 If meaningful runtime verification cannot be restored, stop and keep the control in manual_review instead of weakening the assertions.
+Inspect any existing tests for this control before deciding that no test-file changes are needed. If the control/theme/resource files changed relative to existing coverage, update the tests accordingly.
+Only keep tests unchanged when they still match the current control behavior after inspection; in that case, set `existing_tests_preserved` to true in the report and explain what you reviewed in `notes`.
+{existing_test_guidance}
+When you rewrite the report JSON, use ONLY the canonical fields expected by the orchestrator. Do NOT emit legacy/free-form fields such as `test_file`, `tests_total`, `tests_passed`, `tests_failed`, or `changes`.
+`notes` must remain a JSON array of strings; do not collapse it into a single string.
+Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
+Do NOT run `dotnet build` or `dotnet test` yourself in this repair phase. The orchestrator will perform verification after you finish editing files and writing the report.
+Do NOT write memory files, scratch summaries, or any side-car artifacts outside the relevant test files and the required report JSON.
 Re-inspect these reference files/directories before guessing APIs or helper patterns:
 {reference_section}
 
@@ -554,6 +784,8 @@ Test log excerpt:
         return ControlResult(
             control=manifest.name,
             status="verified" if build_ok and test_ok else "partial",
+            generation_outcome="preserved_existing_tests",
+            existing_tests_preserved=True,
             build={
                 "attempted": self.config.build_after_each_control,
                 "passed": build_ok,
@@ -567,6 +799,44 @@ Test log excerpt:
             },
             notes=["Rechecked existing tests without regeneration."],
         )
+
+    def _run_baseline_verification(
+        self,
+        manifest: ControlManifest,
+        research_summary: dict[str, Any],
+        build_log_path: Path,
+        test_log_path: Path,
+    ) -> dict[str, Any]:
+        if self._research_next_action(research_summary) not in {"update_tests", "preserve_tests"}:
+            return {
+                "attempted": False,
+                "build": {"attempted": False, "passed": False, "log_file": str(build_log_path)},
+                "test_run": {"attempted": False, "passed": False, "log_file": str(test_log_path)},
+            }
+
+        build_ok = True
+        test_ok = True
+        build_attempted = False
+        test_attempted = False
+        if self.config.build_after_each_control:
+            build_attempted = True
+            build_ok = self._run_builds(build_log_path)
+        if build_ok and self.config.test_after_each_control:
+            test_attempted = True
+            test_ok = self._run_tests(manifest, test_log_path)
+        return {
+            "attempted": build_attempted or test_attempted,
+            "build": {
+                "attempted": build_attempted,
+                "passed": build_ok,
+                "log_file": str(build_log_path),
+            },
+            "test_run": {
+                "attempted": test_attempted,
+                "passed": test_ok,
+                "log_file": str(test_log_path),
+            },
+        }
 
     def _run_builds(self, log_path: Path) -> bool:
         commands = [
@@ -615,9 +885,12 @@ Test log excerpt:
         return success
 
     def _evaluate_generated_test_quality(self, result: ControlResult, manifest: ControlManifest) -> str | None:
+        outcome = self._resolve_generation_outcome(result)
+        if outcome not in {"generated_new_tests", "updated_existing_tests"}:
+            return None
         reported_paths = [*result.created_tests, *result.updated_tests]
         if not reported_paths:
-            return "No created or updated test files were reported, so the run cannot be considered verified."
+            return MISSING_REPORTED_TEST_FILES_REASON
 
         resolved_paths = resolve_reported_test_paths(
             reported_paths=reported_paths,
@@ -642,6 +915,233 @@ Test log excerpt:
                 return f"{path}: {reason}"
         return None
 
+    def _resolve_generation_outcome(self, result: ControlResult) -> str:
+        if result.generation_outcome in GENERATION_OUTCOMES:
+            return result.generation_outcome
+        if result.created_tests:
+            return "generated_new_tests"
+        if result.updated_tests:
+            return "updated_existing_tests"
+        if result.existing_tests_preserved:
+            return "preserved_existing_tests"
+        if result.unresolved_issues:
+            return "blocked_runtime_gap"
+        return "generation_failed"
+
+    def _should_attempt_verification(
+        self,
+        result: ControlResult,
+        research_summary: dict[str, Any],
+    ) -> bool:
+        outcome = self._resolve_generation_outcome(result)
+        return outcome in {
+            "generated_new_tests",
+            "updated_existing_tests",
+            "preserved_existing_tests",
+        }
+
+    def _can_preserve_existing_tests(self, research_summary: dict[str, Any]) -> bool:
+        return self._research_coverage_status(research_summary) == "adequate"
+
+    def _should_accept_existing_tests_without_changes(
+        self,
+        result: ControlResult,
+        test_attempted: bool,
+        test_ok: bool,
+    ) -> bool:
+        return (
+            not result.created_tests
+            and not result.updated_tests
+            and result.existing_tests_preserved is True
+            and test_attempted
+            and test_ok
+        )
+
+    def _apply_baseline_context(
+        self,
+        result: ControlResult,
+        baseline: dict[str, Any] | None,
+        build_log_path: Path,
+        test_log_path: Path,
+    ) -> None:
+        if not baseline or not baseline.get("attempted"):
+            return
+
+        build_baseline = baseline.get("build", {})
+        test_baseline = baseline.get("test_run", {})
+        result.build["baseline_attempted"] = build_baseline.get("attempted", False)
+        result.build["baseline_passed"] = build_baseline.get("passed", False)
+        result.build["baseline_log_file"] = build_baseline.get("log_file")
+        result.test_run["baseline_attempted"] = test_baseline.get("attempted", False)
+        result.test_run["baseline_passed"] = test_baseline.get("passed", False)
+        result.test_run["baseline_log_file"] = test_baseline.get("log_file")
+
+        if result.build.get("attempted") and not result.build.get("passed"):
+            result.build["failure_origin"] = self._classify_build_failure_origin(
+                result,
+                build_baseline,
+                build_log_path,
+            )
+        if result.test_run.get("attempted") and not result.test_run.get("passed"):
+            result.test_run["failure_origin"] = self._classify_test_failure_origin(
+                test_baseline,
+            )
+
+    def _classify_build_failure_origin(
+        self,
+        result: ControlResult,
+        baseline_build: dict[str, Any],
+        build_log_path: Path,
+    ) -> str:
+        if not baseline_build.get("attempted"):
+            return "generated_build_failure"
+        if baseline_build.get("passed"):
+            return "generated_build_failure"
+
+        build_log = build_log_path.read_text(encoding="utf-8", errors="ignore") if build_log_path.exists() else ""
+        reported_files = [Path(path).name for path in [*result.created_tests, *result.updated_tests]]
+        if any(file_name and file_name in build_log for file_name in reported_files):
+            return "generated_build_failure"
+        return "pre_existing_build_failure"
+
+    def _classify_test_failure_origin(self, baseline_test: dict[str, Any]) -> str:
+        if not baseline_test.get("attempted"):
+            return "generated_test_failure"
+        if baseline_test.get("passed"):
+            return "generated_test_failure"
+        return "pre_existing_test_failure"
+
+    def _research_has_existing_tests(self, research_summary: dict[str, Any]) -> bool:
+        existing_test_files = self._normalized_existing_test_coverage(research_summary)["files"]
+        if not isinstance(existing_test_files, list):
+            return False
+        return any(str(path).strip() for path in existing_test_files)
+
+    def _research_next_action(self, research_summary: dict[str, Any]) -> str:
+        next_action = str(research_summary.get("next_action", "")).strip().lower()
+        if next_action in {"create_tests", "update_tests", "preserve_tests", "manual_review"}:
+            return next_action
+        coverage_status = self._research_coverage_status(research_summary)
+        return {
+            "none": "create_tests",
+            "adequate": "preserve_tests",
+            "partial": "update_tests",
+            "stale": "update_tests",
+            "unknown": "update_tests",
+        }[coverage_status]
+
+    def _research_coverage_status(self, research_summary: dict[str, Any]) -> str:
+        return self._normalized_existing_test_coverage(research_summary)["status"]
+
+    def _normalized_existing_test_coverage(
+        self,
+        research_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing_test_files = research_summary.get("existing_test_files", [])
+        if not isinstance(existing_test_files, list):
+            existing_test_files = []
+        existing_test_files = [str(path) for path in existing_test_files if str(path).strip()]
+
+        coverage = research_summary.get("existing_test_coverage")
+        status = "unknown"
+        gaps: list[str] = []
+        notes: list[str] = []
+        if isinstance(coverage, dict):
+            raw_status = str(coverage.get("status", "")).strip().lower()
+            if raw_status in RESEARCH_COVERAGE_STATUSES:
+                status = raw_status
+            gaps = [str(item) for item in coverage.get("gaps", []) if str(item).strip()]
+            notes = [str(item) for item in coverage.get("notes", []) if str(item).strip()]
+        elif isinstance(coverage, str):
+            normalized_text = coverage.strip().lower()
+            if normalized_text in RESEARCH_COVERAGE_STATUSES:
+                status = normalized_text
+            elif "none" in normalized_text or "no existing tests" in normalized_text:
+                status = "none"
+            elif "adequate" in normalized_text:
+                status = "adequate"
+            elif "partial" in normalized_text:
+                status = "partial"
+            elif "stale" in normalized_text:
+                status = "stale"
+            elif "unknown" in normalized_text:
+                status = "unknown"
+            if coverage.strip():
+                notes.append(coverage.strip())
+
+        if status == "unknown":
+            status = "adequate" if existing_test_files else "none"
+
+        return {
+            "status": status,
+            "files": existing_test_files,
+            "gaps": gaps,
+            "notes": notes,
+        }
+
+    def _normalize_research_summary(self, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(payload)
+        normalized_coverage = self._normalized_existing_test_coverage(normalized)
+        normalized["existing_test_files"] = normalized_coverage["files"]
+        normalized["existing_test_coverage"] = normalized_coverage
+        normalized["next_action"] = self._research_next_action(normalized)
+        return normalized
+
+    def _compact_research_summary_for_prompt(
+        self,
+        research_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "control": research_summary.get("control"),
+            "status": research_summary.get("status"),
+            "control_type": research_summary.get("control_type"),
+            "allowed_test_projects": research_summary.get("allowed_test_projects", []),
+            "existing_test_files": research_summary.get("existing_test_files", []),
+            "existing_test_coverage": self._normalized_existing_test_coverage(research_summary),
+            "next_action": self._research_next_action(research_summary),
+            "must_verify": research_summary.get("must_verify", []),
+            "avoid": research_summary.get("avoid", []),
+            "summary": research_summary.get("summary", ""),
+        }
+
+    def _extract_qwen_error_summary(self, stdout: str) -> str | None:
+        stripped = stdout.strip()
+        if not stripped:
+            return None
+        try:
+            payload = json.loads(stripped.lstrip("\ufeff"))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return None
+        error_type = str(error.get("type", "QwenError")).strip() or "QwenError"
+        message = str(error.get("message", "")).strip()
+        code = error.get("code")
+        suffix = f" (code={code})" if code is not None else ""
+        if message:
+            return f"{error_type}{suffix}: {message}"
+        return f"{error_type}{suffix}"
+
+    def _extract_qwen_iteration_summary(self, result: QwenRunResult) -> str | None:
+        for message in reversed(result.assistant_messages):
+            normalized = " ".join(message.split()).strip()
+            if not normalized:
+                continue
+            return normalized[:300] + ("..." if len(normalized) > 300 else "")
+        return None
+
+    def _extract_qwen_transport_error(self, result: QwenRunResult) -> str | None:
+        for message in reversed(result.assistant_messages):
+            marker = "[API Error:"
+            if marker not in message:
+                continue
+            suffix = message.split(marker, 1)[1].strip()
+            return suffix[:-1] if suffix.endswith("]") else suffix
+        return None
+
     def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
         return bool(manifest.custom_code_files)
 
@@ -654,6 +1154,7 @@ Test log excerpt:
         test_log_path: Path,
         build_attempted: bool,
         test_attempted: bool,
+        baseline: dict[str, Any] | None = None,
     ) -> None:
         result.build = {
             "attempted": build_attempted,
@@ -666,6 +1167,12 @@ Test log excerpt:
             "log_file": str(test_log_path),
             "failed_tests": [],
         }
+        self._apply_baseline_context(
+            result,
+            baseline=baseline,
+            build_log_path=build_log_path,
+            test_log_path=test_log_path,
+        )
 
     def _ensure_research_summary(
         self,
@@ -675,7 +1182,10 @@ Test log excerpt:
         research_output_path: Path,
     ) -> dict[str, Any]:
         if research_summary_path.exists():
-            return json.loads(research_summary_path.read_text(encoding="utf-8"))
+            payload = json.loads(research_summary_path.read_text(encoding="utf-8"))
+            normalized = self._normalize_research_summary(payload)
+            research_summary_path.write_text(json.dumps(normalized, indent=2, ensure_ascii=False), encoding="utf-8")
+            return normalized
 
         prompt = self._build_research_prompt(manifest, research_summary_path)
         research_prompt_path.write_text(prompt, encoding="utf-8")
@@ -683,7 +1193,7 @@ Test log excerpt:
             manifest.name,
             prompt,
             research_output_path,
-            session_turns=12,
+            session_turns=self.config.max_session_turns,
         )
         if not research_summary_path.exists():
             fallback = {
@@ -692,11 +1202,17 @@ Test log excerpt:
                 "summary": qwen_result.assistant_messages[-1] if qwen_result.assistant_messages else "",
                 "control_type": None,
                 "allowed_test_projects": ["headless"] if not self._should_run_unit_tests(manifest) else ["headless", "unit"],
+                "existing_test_files": [],
+                "existing_test_coverage": {"status": "unknown", "files": [], "gaps": [], "notes": []},
+                "next_action": "update_tests",
                 "must_verify": [],
                 "avoid": ["Do not invent APIs or namespaces."],
             }
             research_summary_path.write_text(json.dumps(fallback, indent=2, ensure_ascii=False), encoding="utf-8")
-        return json.loads(research_summary_path.read_text(encoding="utf-8"))
+        payload = json.loads(research_summary_path.read_text(encoding="utf-8"))
+        normalized = self._normalize_research_summary(payload)
+        research_summary_path.write_text(json.dumps(normalized, indent=2, ensure_ascii=False), encoding="utf-8")
+        return normalized
 
     def _build_research_prompt(self, manifest: ControlManifest, research_summary_path: Path) -> str:
         reference_paths = self._gather_reference_paths()
@@ -716,6 +1232,7 @@ Test log excerpt:
 Do NOT write tests, do NOT build projects, and do NOT modify repository source/test files during this phase.
 Writing the research summary artifact requested below is required and explicitly allowed.
 Your only goal is to inspect the control, framework sources, and existing test helpers so the implementation phase can start from a compact, grounded summary instead of guessing.
+Use platform-neutral shell behavior. Do NOT rely on bash-only utilities such as `printf`, `cat`, `head`, or `tail` unless you have first confirmed they exist in this environment. Prefer the provided file tools or Python for simple text/file operations.
 
 Target control manifest:
 {manifest_json}
@@ -735,14 +1252,31 @@ Research output requirements:
   - control_type
   - relevant_reference_files
   - allowed_test_projects
+  - existing_test_files
+  - existing_test_coverage
+  - next_action
   - must_verify
   - avoid
   - summary
+- `existing_test_coverage` must be an object with this shape:
+  {{
+    "status": "none|partial|adequate|stale|unknown",
+    "files": [],
+    "gaps": [],
+    "notes": []
+  }}
+- `next_action` must be one of:
+  - create_tests
+  - update_tests
+  - preserve_tests
+  - manual_review
 
 Rules:
 - Prefer narrow, concrete findings over broad narration.
 - Identify the CLR type/namespace only if you can confirm it from the inspected sources.
 - If a type/member/visual structure cannot be confirmed, list it in avoid instead of guessing.
+- Inspect existing control-specific tests, if any, and state whether they already cover the current control or appear stale/incomplete.
+- Set `next_action` for the next phase instead of leaving the Python orchestrator to infer the semantic intent.
 - Keep the summary compact so a fresh implementation session can use it without replaying all exploration context.
 
 Return a short plain-text summary after writing the JSON file.
@@ -809,11 +1343,12 @@ Return a short plain-text summary after writing the JSON file.
     ) -> ControlResult:
         if report_path.exists():
             payload = json.loads(report_path.read_text(encoding="utf-8"))
-            return ControlResult(**payload)
+            return ControlResult.from_dict(payload)
 
         return ControlResult(
             control=control_name,
             status="partial",
+            generation_outcome="generation_failed",
             build={
                 "attempted": self.config.build_after_each_control,
                 "passed": build_ok,

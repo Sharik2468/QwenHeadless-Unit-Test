@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,6 +47,8 @@ class ControlResult:
     status: str
     created_tests: list[str] = field(default_factory=list)
     updated_tests: list[str] = field(default_factory=list)
+    generation_outcome: str | None = None
+    existing_tests_preserved: bool | None = None
     checks_added: dict[str, Any] = field(default_factory=dict)
     unresolved_issues: list[dict[str, Any]] = field(default_factory=list)
     build: dict[str, Any] = field(default_factory=dict)
@@ -54,7 +56,77 @@ class ControlResult:
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        return {key: value for key, value in payload.items() if value is not None}
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ControlResult":
+        def _coerce_string_list(value: Any) -> list[str]:
+            if value is None:
+                return []
+            if isinstance(value, str):
+                stripped = value.strip()
+                return [stripped] if stripped else []
+            if isinstance(value, list):
+                return [str(item).strip() for item in value if str(item).strip()]
+            return [str(value).strip()] if str(value).strip() else []
+
+        def _coerce_issue_list(value: Any) -> list[dict[str, Any]]:
+            if value is None:
+                return []
+            if isinstance(value, dict):
+                return [value]
+            if isinstance(value, list):
+                normalized_issues: list[dict[str, Any]] = []
+                for item in value:
+                    if isinstance(item, dict):
+                        normalized_issues.append(item)
+                    elif str(item).strip():
+                        normalized_issues.append({"type": "reported_issue", "reason": str(item).strip()})
+                return normalized_issues
+            if str(value).strip():
+                return [{"type": "reported_issue", "reason": str(value).strip()}]
+            return []
+
+        supported_fields = {item.name for item in fields(cls)}
+        normalized = {key: value for key, value in payload.items() if key in supported_fields}
+        normalized.setdefault("control", str(payload.get("control", "")))
+        normalized.setdefault("status", str(payload.get("status", "partial")))
+        normalized["created_tests"] = _coerce_string_list(normalized.get("created_tests"))
+        normalized["updated_tests"] = _coerce_string_list(normalized.get("updated_tests"))
+        normalized["notes"] = _coerce_string_list(normalized.get("notes"))
+        normalized["unresolved_issues"] = _coerce_issue_list(normalized.get("unresolved_issues"))
+
+        legacy_fields_handled: set[str] = set()
+        legacy_test_file = payload.get("test_file")
+        if isinstance(legacy_test_file, str) and legacy_test_file.strip():
+            legacy_fields_handled.add("test_file")
+            if not normalized["created_tests"] and not normalized["updated_tests"]:
+                if payload.get("existing_tests_preserved"):
+                    normalized["generation_outcome"] = normalized.get("generation_outcome") or "preserved_existing_tests"
+                elif payload.get("changes"):
+                    normalized["updated_tests"] = [legacy_test_file.strip()]
+                    normalized["generation_outcome"] = normalized.get("generation_outcome") or "updated_existing_tests"
+                else:
+                    normalized["created_tests"] = [legacy_test_file.strip()]
+                    normalized["generation_outcome"] = normalized.get("generation_outcome") or "generated_new_tests"
+
+        legacy_changes = payload.get("changes")
+        if legacy_changes is not None:
+            legacy_fields_handled.add("changes")
+            normalized["notes"].extend(_coerce_string_list(legacy_changes))
+
+        for legacy_field in ("tests_total", "tests_passed", "tests_failed"):
+            if legacy_field in payload:
+                legacy_fields_handled.add(legacy_field)
+
+        result = cls(**normalized)
+        ignored_fields = sorted(set(payload) - supported_fields - legacy_fields_handled)
+        if ignored_fields:
+            result.notes.append(
+                "Ignored unsupported report fields: " + ", ".join(ignored_fields)
+            )
+        return result
 
 
 @dataclass(slots=True)
@@ -84,6 +156,8 @@ class RunConfig:
     model: str = "qwen3-coder-plus"
     include_control_pattern: str = "*"
     exclude_control_patterns: list[str] = field(default_factory=list)
+    skip_controls: int = 0
+    start_from_control: str | None = None
     max_controls: int = -1
     max_repair_attempts: int = 3
     approval_mode: str = "yolo"
