@@ -562,6 +562,9 @@ class Orchestrator:
         summary = self._extract_qwen_iteration_summary(result)
         if summary:
             self._log(f"[uikit-testgen] {control_name}: qwen summary -> {summary}")
+        transport_error = self._extract_qwen_transport_error(result)
+        if transport_error:
+            self._log(f"[uikit-testgen] {control_name}: qwen transport error -> {transport_error}")
         if result.returncode != 0:
             error_summary = self._extract_qwen_error_summary(result.stdout)
             if error_summary:
@@ -584,7 +587,11 @@ class Orchestrator:
             else "- None provided."
         )
         manifest_json = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
-        research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
+        research_summary_json = json.dumps(
+            self._compact_research_summary_for_prompt(research_summary),
+            indent=2,
+            ensure_ascii=False,
+        )
         coverage_status = self._research_coverage_status(research_summary)
         next_action = self._research_next_action(research_summary)
         existing_test_guidance = {
@@ -722,7 +729,11 @@ Return a short final summary in plain text after writing the report.
             if reference_paths
             else "- None provided."
         )
-        research_summary_json = json.dumps(research_summary, indent=2, ensure_ascii=False)
+        research_summary_json = json.dumps(
+            self._compact_research_summary_for_prompt(research_summary),
+            indent=2,
+            ensure_ascii=False,
+        )
         coverage_status = self._research_coverage_status(research_summary)
         existing_test_guidance = {
             "none": "Research found no existing control-specific tests. This repair pass should create meaningful headless runtime tests instead of preserving the empty state.",
@@ -1076,6 +1087,23 @@ Test log excerpt:
         normalized["next_action"] = self._research_next_action(normalized)
         return normalized
 
+    def _compact_research_summary_for_prompt(
+        self,
+        research_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "control": research_summary.get("control"),
+            "status": research_summary.get("status"),
+            "control_type": research_summary.get("control_type"),
+            "allowed_test_projects": research_summary.get("allowed_test_projects", []),
+            "existing_test_files": research_summary.get("existing_test_files", []),
+            "existing_test_coverage": self._normalized_existing_test_coverage(research_summary),
+            "next_action": self._research_next_action(research_summary),
+            "must_verify": research_summary.get("must_verify", []),
+            "avoid": research_summary.get("avoid", []),
+            "summary": research_summary.get("summary", ""),
+        }
+
     def _extract_qwen_error_summary(self, stdout: str) -> str | None:
         stripped = stdout.strip()
         if not stripped:
@@ -1103,6 +1131,15 @@ Test log excerpt:
             if not normalized:
                 continue
             return normalized[:300] + ("..." if len(normalized) > 300 else "")
+        return None
+
+    def _extract_qwen_transport_error(self, result: QwenRunResult) -> str | None:
+        for message in reversed(result.assistant_messages):
+            marker = "[API Error:"
+            if marker not in message:
+                continue
+            suffix = message.split(marker, 1)[1].strip()
+            return suffix[:-1] if suffix.endswith("]") else suffix
         return None
 
     def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
