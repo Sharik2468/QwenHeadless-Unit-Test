@@ -544,6 +544,45 @@ class ControlResultParsingTests(unittest.TestCase):
                 "FatalTurnLimitedError (code=53): Reached max session turns",
             )
 
+    def test_extract_qwen_iteration_summary_uses_last_non_empty_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            unit_project = root / "tests/Unit/Unit.csproj"
+            headless_project = root / "tests/Headless/Headless.csproj"
+            styles_root = root / "styles"
+            unit_project.parent.mkdir(parents=True)
+            headless_project.parent.mkdir(parents=True)
+            styles_root.mkdir(parents=True)
+            unit_project.write_text("<Project />", encoding="utf-8")
+            headless_project.write_text("<Project />", encoding="utf-8")
+
+            orchestrator = Orchestrator(
+                RunConfig(
+                    repo_root=root,
+                    unit_tests_project=unit_project,
+                    headless_tests_project=headless_project,
+                    styles_root=styles_root,
+                    custom_controls_root=None,
+                    artifacts_dir=root / "artifacts",
+                )
+            )
+            result = QwenRunResult(
+                returncode=0,
+                stdout="[]",
+                stderr="",
+                session_id="session-1",
+                assistant_messages=[
+                    "",
+                    "  Research complete.  ",
+                    "Created tests for control.\nUpdated report.\n",
+                ],
+                raw_events=[],
+            )
+
+            summary = orchestrator._extract_qwen_iteration_summary(result)
+
+            self.assertEqual(summary, "Created tests for control. Updated report.")
+
 
 if __name__ == "__main__":
     unittest.main()

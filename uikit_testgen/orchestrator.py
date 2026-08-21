@@ -559,6 +559,9 @@ class Orchestrator:
         self._log(
             f"[uikit-testgen] {control_name}: qwen finished (rc={result.returncode}, session={result.session_id or 'n/a'})"
         )
+        summary = self._extract_qwen_iteration_summary(result)
+        if summary:
+            self._log(f"[uikit-testgen] {control_name}: qwen summary -> {summary}")
         if result.returncode != 0:
             error_summary = self._extract_qwen_error_summary(result.stdout)
             if error_summary:
@@ -1093,6 +1096,14 @@ Test log excerpt:
         if message:
             return f"{error_type}{suffix}: {message}"
         return f"{error_type}{suffix}"
+
+    def _extract_qwen_iteration_summary(self, result: QwenRunResult) -> str | None:
+        for message in reversed(result.assistant_messages):
+            normalized = " ".join(message.split()).strip()
+            if not normalized:
+                continue
+            return normalized[:300] + ("..." if len(normalized) > 300 else "")
+        return None
 
     def _should_run_unit_tests(self, manifest: ControlManifest) -> bool:
         return bool(manifest.custom_code_files)
